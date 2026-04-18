@@ -1,6 +1,10 @@
 # synthetic_tables
 
+> Built with Codex GPT-5.4
+
 `synthetic_tables` is a modular Python project for generating synthetic table datasets aimed at OCR and table extraction workflows.
+
+The purpose of this repository is to create document-like, visually varied table layouts for information extraction experiments. It generates the same structured content across different formats, styles, and rendering variables so you can test OCR pipelines and VLM-based document understanding systems under a range of layout conditions.
 
 The project now covers the full pipeline implemented in stages:
 
