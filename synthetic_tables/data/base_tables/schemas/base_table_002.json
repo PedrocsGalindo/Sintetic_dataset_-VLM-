@@ -1,0 +1,82 @@
+{
+  "table_id": "tbl_009382ac9db8",
+  "name": "base_table_002",
+  "row_count": 41,
+  "column_count": 6,
+  "seed": 234760738,
+  "columns": [
+    {
+      "name": "pattern",
+      "dtype": "symbolic_mixed",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.031,
+        "symbols": "!*"
+      }
+    },
+    {
+      "name": "invoice_id",
+      "dtype": "identifier",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.077,
+        "prefix": "DOC",
+        "start": 2369
+      }
+    },
+    {
+      "name": "coverage",
+      "dtype": "percentage",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.086,
+        "precision": 1,
+        "scale": 100
+      }
+    },
+    {
+      "name": "product_code",
+      "dtype": "alphanumeric_code",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.063,
+        "segments": [
+          4,
+          2
+        ],
+        "separator": "-"
+      }
+    },
+    {
+      "name": "quantity",
+      "dtype": "integer",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.09,
+        "min_value": 287,
+        "max_value": 2242
+      }
+    },
+    {
+      "name": "completion",
+      "dtype": "percentage",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.053,
+        "precision": 0,
+        "scale": 100
+      }
+    }
+  ],
+  "metadata": {
+    "generator_stage": "stage_2_base_tables",
+    "column_types": [
+      "symbolic_mixed",
+      "identifier",
+      "percentage",
+      "alphanumeric_code",
+      "integer",
+      "percentage"
+    ]
+  }
+}

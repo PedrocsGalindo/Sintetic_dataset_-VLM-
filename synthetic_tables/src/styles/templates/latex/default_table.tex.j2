@@ -1,0 +1,50 @@
+\documentclass[10pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[table]{xcolor}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\renewcommand{\arraystretch}{ {{ latex.arraystretch }} }
+\setlength{\tabcolsep}{ {{ latex.tabcolsep_pt }}pt }
+\begin{document}
+\pagestyle{empty}
+\noindent{\Large {{ table.name_escaped }}}\\[8pt]
+{% if style.zebra_striping %}
+\rowcolors{2}{gray!10}{white}
+{% endif %}
+\begin{longtable}{ {{ latex.column_spec }} }
+{% if latex.has_horizontal_rules %}
+\hline
+{% endif %}
+{% for column in columns -%}
+{{ column.header_escaped }}{% if not loop.last %} & {% endif %}
+{%- endfor %} \\
+{% if latex.has_horizontal_rules %}
+\hline
+{% endif %}
+\endfirsthead
+{% if latex.has_horizontal_rules %}
+\hline
+{% endif %}
+{% for column in columns -%}
+{{ column.header_escaped }}{% if not loop.last %} & {% endif %}
+{%- endfor %} \\
+{% if latex.has_horizontal_rules %}
+\hline
+{% endif %}
+\endhead
+{% for row in rows -%}
+{% for cell in row -%}
+{{ cell }}{% if not loop.last %} & {% endif %}
+{%- endfor %} \\
+{% if latex.has_horizontal_rules and style.border_style == "double" %}
+\hline
+{% endif %}
+{% endfor %}
+{% if latex.has_horizontal_rules %}
+\hline
+{% endif %}
+\end{longtable}
+\end{document}

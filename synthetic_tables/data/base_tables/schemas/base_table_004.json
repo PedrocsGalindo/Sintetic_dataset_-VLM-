@@ -1,0 +1,147 @@
+{
+  "table_id": "tbl_7a340c3c6db3",
+  "name": "base_table_004",
+  "row_count": 52,
+  "column_count": 11,
+  "seed": 236696312,
+  "columns": [
+    {
+      "name": "composition",
+      "dtype": "fraction",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.081,
+        "max_numerator": 10,
+        "max_denominator": 15
+      }
+    },
+    {
+      "name": "product_code",
+      "dtype": "alphanumeric_code",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.05,
+        "segments": [
+          3,
+          3
+        ],
+        "separator": "/"
+      }
+    },
+    {
+      "name": "utilization",
+      "dtype": "percentage",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.085,
+        "precision": 2,
+        "scale": 100
+      }
+    },
+    {
+      "name": "units",
+      "dtype": "integer",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.108,
+        "min_value": 138,
+        "max_value": 2928
+      }
+    },
+    {
+      "name": "utilization_5",
+      "dtype": "percentage",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.07,
+        "precision": 1,
+        "scale": 100
+      }
+    },
+    {
+      "name": "notes",
+      "dtype": "text_long",
+      "nullable": false,
+      "metadata": {
+        "null_probability": 0.0,
+        "min_words": 6,
+        "max_words": 14
+      }
+    },
+    {
+      "name": "asset_code",
+      "dtype": "alphanumeric_code",
+      "nullable": false,
+      "metadata": {
+        "null_probability": 0.0,
+        "segments": [
+          4,
+          2
+        ],
+        "separator": "-"
+      }
+    },
+    {
+      "name": "created_at",
+      "dtype": "date",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.038,
+        "date_format": "%d/%m/%Y",
+        "year": 2024
+      }
+    },
+    {
+      "name": "tag_code",
+      "dtype": "alphanumeric_code",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.101,
+        "segments": [
+          2,
+          4
+        ],
+        "separator": "_"
+      }
+    },
+    {
+      "name": "issue_date",
+      "dtype": "date",
+      "nullable": false,
+      "metadata": {
+        "null_probability": 0.0,
+        "date_format": "%d/%m/%Y",
+        "year": 2023
+      }
+    },
+    {
+      "name": "product_code_11",
+      "dtype": "alphanumeric_code",
+      "nullable": true,
+      "metadata": {
+        "null_probability": 0.039,
+        "segments": [
+          4,
+          2
+        ],
+        "separator": "/"
+      }
+    }
+  ],
+  "metadata": {
+    "generator_stage": "stage_2_base_tables",
+    "column_types": [
+      "fraction",
+      "alphanumeric_code",
+      "percentage",
+      "integer",
+      "percentage",
+      "text_long",
+      "alphanumeric_code",
+      "date",
+      "alphanumeric_code",
+      "date",
+      "alphanumeric_code"
+    ]
+  }
+}

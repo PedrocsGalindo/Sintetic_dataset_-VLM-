@@ -1,0 +1,4 @@
+.venv
+.venv/
+synthetic_tables/data/debug
+synthetic_tables/data/rendered

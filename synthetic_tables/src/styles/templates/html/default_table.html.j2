@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ table.name }} - synthetic table</title>
+  <style>
+    :root {
+      --page-bg: {{ style.background_color }};
+      --text-color: {{ style.text_color }};
+      --accent-color: {{ style.accent_color }};
+      --border-color: {{ style.border_color }};
+      --header-bg: {{ style.header_background }};
+      --font-family: {{ style.font_family }};
+      --font-size: {{ style.font_size_pt }}pt;
+      --line-height: {{ style.line_height }};
+      --padding: {{ style.padding }}px;
+      --table-width: {{ style.table_width }};
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      background: linear-gradient(180deg, #f7fafc 0%, var(--page-bg) 100%);
+      color: var(--text-color);
+      font-family: var(--font-family), serif;
+      font-size: var(--font-size);
+      line-height: var(--line-height);
+    }
+
+    .table-wrap {
+      width: var(--table-width);
+      margin: 0 auto;
+      padding: 18px;
+      background: #ffffff;
+      border: 1px {{ css.border_style }} var(--border-color);
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+    }
+
+    .table-title {
+      margin: 0 0 14px 0;
+      color: var(--accent-color);
+      font-size: calc(var(--font-size) * 1.2);
+      letter-spacing: 0.03em;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: {{ css.table_layout }};
+    }
+
+    thead th {
+      background: var(--header-bg);
+      border: 1px {{ css.border_style }} var(--border-color);
+      padding: var(--padding);
+      text-align: left;
+      {{ css.header_emphasis_css }}
+    }
+
+    tbody td {
+      border: 1px {{ css.border_style }} var(--border-color);
+      padding: var(--padding);
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }
+
+    {% if style.zebra_striping %}
+    tbody tr:nth-child(even) td {
+      background: rgba(148, 163, 184, 0.08);
+    }
+    {% endif %}
+
+    {% for column in columns %}
+    .col-{{ loop.index0 }} {
+      text-align: {{ column.alignment }};
+      width: {{ column.width }};
+    }
+    {% endfor %}
+  </style>
+</head>
+<body>
+  <section class="table-wrap">
+    <h1 class="table-title">{{ table.name }}</h1>
+    <table aria-label="{{ table.name }}">
+      <thead>
+        <tr>
+          {% for column in columns %}
+          <th class="col-{{ loop.index0 }}">{{ column.display_name }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          {% for cell in row %}
+          <td class="col-{{ loop.index0 }}">{{ cell }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</body>
+</html>
