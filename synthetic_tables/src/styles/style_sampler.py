@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from pathlib import Path
 
 SUPPORTED_STYLE_FORMATS: tuple[str, ...] = ("html", "latex", "markdown")
 
@@ -76,13 +77,26 @@ class StyleSampler:
         palette = rng.choice(palettes)
 
         template_names = {
-            "html": "default_table.html.j2",
-            "latex": "default_table.tex.j2",
-            "markdown": "default_markdown",
+            "html": (
+                "default_table.html.j2",
+                "document_columns.html.j2",
+                "document_stream.html.j2",
+                "numeric_blocks.html.j2",
+                "hybrid_mosaic.html.j2",
+                "editorial_blocks.html.j2",
+                "procedure_form.html.j2",
+            ),
+            "latex": ("default_table.tex.j2",),
+            "markdown": (
+                "default_markdown",
+                "markdown_records",
+                "markdown_mixed",
+                "markdown_briefing",
+            ),
         }
 
         return TableStyle(
-            template_name=template_names.get(normalized_format, "default_table.html.j2"),
+            template_name=rng.choice(template_names.get(normalized_format, ("default_table.html.j2",))),
             font_family=rng.choice(font_choices.get(normalized_format, ("Helvetica",))),
             font_size_pt=rng.randint(9, 13),
             line_height=round(rng.uniform(1.1, 1.6), 2),
@@ -105,7 +119,8 @@ def build_style_id(source_format: str, style: TableStyle) -> str:
     """Build a stable style identifier."""
 
     safe_font = style.font_family.lower().replace(" ", "_")
+    template_stem = Path(style.template_name).stem.replace(".", "_")
     return (
-        f"{source_format}_{safe_font}_{style.font_size_pt}_{style.border_style}_"
+        f"{source_format}_{template_stem}_{safe_font}_{style.font_size_pt}_{style.border_style}_"
         f"{style.alignment_profile}_{style.header_emphasis}"
     )

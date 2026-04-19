@@ -18,7 +18,6 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
-from xhtml2pdf import pisa
 
 from utils.io import ensure_parent_dir
 
@@ -128,6 +127,12 @@ class _FirstTableParser(HTMLParser):
 class PDFRenderer:
     """Convert HTML, Markdown, and LaTeX sources into PDF artifacts."""
 
+    _HTML_PAGE_FORMAT = "A4"
+    _HTML_PAGE_MARGIN_TOP = "9mm"
+    _HTML_PAGE_MARGIN_RIGHT = "8mm"
+    _HTML_PAGE_MARGIN_BOTTOM = "9mm"
+    _HTML_PAGE_MARGIN_LEFT = "8mm"
+
     def render(self, source_path: Path, output_path: Path, source_format: str) -> PDFRenderResult:
         """Convert a source document into a PDF file."""
 
@@ -157,20 +162,161 @@ class PDFRenderer:
         )
 
     def render_html(self, source_path: Path, output_path: Path) -> str:
-        """Render an HTML file to PDF using the HTML-only safe table path."""
+        """Render an HTML file to PDF while preserving the original HTML layout when possible."""
 
         html_source = source_path.read_text(encoding="utf-8")
-        parsed_document = self._parse_html_document(html_source, source_path.stem)
-        self._render_html_table_to_pdf(parsed_document, output_path)
-        return "reportlab-html-safe"
+        if self._render_html_with_playwright(source_path, output_path):
+            return "playwright-chromium"
+
+        if self._render_html_with_weasyprint(source_path, html_source, output_path):
+            return "weasyprint-html"
+
+        sanitized_html = self._sanitize_html_for_pdf(html_source)
+        self._html_to_pdf(sanitized_html, output_path)
+        return "xhtml2pdf-html-fallback"
 
     def _html_to_pdf(self, html_content: str, output_path: Path) -> None:
         """Render an HTML string to PDF using xhtml2pdf."""
+
+        from xhtml2pdf import pisa
 
         with output_path.open("wb") as handle:
             result = pisa.CreatePDF(html_content, dest=handle, encoding="utf-8")
         if result.err:
             raise RuntimeError(f"Failed to render PDF with xhtml2pdf: {result.err}")
+
+    def _render_html_with_playwright(self, source_path: Path, output_path: Path) -> bool:
+        """Render the saved HTML file through Chromium for full CSS fidelity."""
+
+        try:
+            from playwright.sync_api import Error as PlaywrightError
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            return False
+
+        page_css = self._html_print_css()
+        source_uri = source_path.resolve().as_uri()
+
+        try:
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch()
+                try:
+                    page = browser.new_page()
+                    page.goto(source_uri, wait_until="load")
+                    page.emulate_media(media="print")
+                    page.add_style_tag(content=page_css)
+                    page.pdf(
+                        path=str(output_path),
+                        format=self._HTML_PAGE_FORMAT,
+                        print_background=True,
+                        prefer_css_page_size=False,
+                        margin=self._playwright_pdf_margin(),
+                    )
+                finally:
+                    browser.close()
+        except (OSError, PlaywrightError):
+            return False
+
+        return True
+
+    def _render_html_with_weasyprint(self, source_path: Path, html_source: str, output_path: Path) -> bool:
+        """Render the original HTML/CSS with WeasyPrint when Chromium is unavailable."""
+
+        try:
+            from weasyprint import CSS, HTML
+        except (ImportError, OSError):
+            return False
+
+        page_css = CSS(string=self._html_print_css())
+
+        try:
+            HTML(
+                string=html_source,
+                base_url=str(source_path.resolve().parent),
+                media_type="print",
+            ).write_pdf(str(output_path), stylesheets=[page_css])
+        except OSError:
+            return False
+
+        return True
+
+    def _html_print_css(self) -> str:
+        """Inject print-only layout constraints for safer PDF page fit."""
+
+        page_margin = (
+            f"{self._HTML_PAGE_MARGIN_TOP} "
+            f"{self._HTML_PAGE_MARGIN_RIGHT} "
+            f"{self._HTML_PAGE_MARGIN_BOTTOM} "
+            f"{self._HTML_PAGE_MARGIN_LEFT}"
+        )
+        return (
+            "@page {"
+            f"size: {self._HTML_PAGE_FORMAT};"
+            f"margin: {page_margin};"
+            "}"
+            "@media print {"
+            "html {"
+            "box-sizing: border-box;"
+            "-webkit-print-color-adjust: exact !important;"
+            "print-color-adjust: exact !important;"
+            "}"
+            "*, *::before, *::after {"
+            "box-sizing: inherit;"
+            "}"
+            "body {"
+            "margin: 0 !important;"
+            "padding: 0 !important;"
+            "min-width: 0 !important;"
+            "background: #ffffff !important;"
+            "}"
+            ".table-wrap, .sheet, .stream-sheet, .numbers-sheet {"
+            "width: auto !important;"
+            "max-width: 100% !important;"
+            "margin: 0 auto !important;"
+            "padding: 16px !important;"
+            "overflow: hidden !important;"
+            "box-shadow: none !important;"
+            "break-inside: avoid-page;"
+            "}"
+            ".masthead, .header {"
+            "gap: 14px !important;"
+            "}"
+            ".stats {"
+            "min-width: 0 !important;"
+            "max-width: 240px !important;"
+            "}"
+            ".hero-grid {"
+            "grid-template-columns: minmax(0, 1.58fr) minmax(220px, 0.9fr) !important;"
+            "gap: 16px !important;"
+            "}"
+            ".editorial-grid {"
+            "grid-template-columns: minmax(0, 1.3fr) minmax(220px, 0.82fr) !important;"
+            "gap: 16px !important;"
+            "}"
+            ".field-columns, .column-notes {"
+            "gap: 12px !important;"
+            "}"
+            ".sidebar, .article-stack, .record-list, .note-stack, .block-grid, .stream-band, .ribbon {"
+            "min-width: 0 !important;"
+            "}"
+            ".stream-line, .ribbon-row, .inline-summary, .article-block, .record-card, .sidebar-card, .mini-card, .note-card, .field-card, .block, .stat {"
+            "max-width: 100% !important;"
+            "}"
+            "img, svg, canvas, table {"
+            "max-width: 100% !important;"
+            "}"
+            "}"
+        )
+
+    def _playwright_pdf_margin(self) -> dict[str, str]:
+        """Return explicit PDF margins for Playwright output."""
+
+        return {
+            "top": self._HTML_PAGE_MARGIN_TOP,
+            "right": self._HTML_PAGE_MARGIN_RIGHT,
+            "bottom": self._HTML_PAGE_MARGIN_BOTTOM,
+            "left": self._HTML_PAGE_MARGIN_LEFT,
+        }
 
     def _latex_to_pdf(self, source_path: Path, output_path: Path) -> str:
         """Render LaTeX to PDF when pdflatex is available, otherwise fallback."""
@@ -335,8 +481,18 @@ class PDFRenderer:
         simplified_css = (
             "<style>"
             "body{font-family:Helvetica,Arial,sans-serif;font-size:10pt;color:#1f2933;padding:18px;}"
-            ".table-wrap{width:100%;}"
-            ".table-title{font-size:16pt;color:#2c5282;margin-bottom:12px;}"
+            ".table-wrap,.sheet,.stream-sheet,.numbers-sheet{width:100%;background:#ffffff;"
+            "border:1px solid #64748b;padding:14px;box-sizing:border-box;}"
+            ".masthead,.header{display:block;}"
+            ".stats,.block-grid{display:block;}"
+            ".stat,.block,.record-card{display:block;margin-bottom:10px;padding:10px;"
+            "border:1px solid #cbd5e0;background:#f8fafc;}"
+            ".table-title,.title{font-size:16pt;color:#2c5282;margin-bottom:12px;}"
+            ".subtitle,.summary,.headline,.field,.stream-line{font-size:10pt;}"
+            ".record-columns,.stream{display:block;}"
+            ".record-card,.stream-line,.block{page-break-inside:avoid;}"
+            ".line-label,.record-tag,.chip-label,.stat-label{font-weight:bold;color:#2c5282;}"
+            ".chip-value,.stat-value{font-weight:bold;}"
             "table{width:100%;border-collapse:collapse;table-layout:auto;}"
             "th,td{border:1px solid #64748b;padding:6px;vertical-align:top;}"
             "th{background:#dcebfa;font-weight:bold;}"

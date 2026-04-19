@@ -103,9 +103,11 @@ def generate_visual_samples(config: PipelineConfig) -> None:
                     style=style,
                 )
 
-                pdf_path = (
-                    config.paths.rendered_pdf_dir
-                    / f"{table.name}__{source_format}__{version_label}.pdf"
+                pdf_path = _rendered_pdf_path(
+                    config=config,
+                    source_format=source_format,
+                    table_name=table.name,
+                    version_label=version_label
                 )
                 pdf_result = pdf_renderer.render(
                     source_path=rendered_source_path,
@@ -233,6 +235,17 @@ def _rendered_source_path(
         "markdown": ".md",
     }
     return directory_map[source_format] / f"{table_name}__{version_label}{suffix_map[source_format]}"
+
+
+def _rendered_pdf_path(
+    config: PipelineConfig,
+    source_format: str,
+    table_name: str,
+    version_label: str,
+) -> Path:
+    """Resolve the rendered PDF path and include the sampled layout/style family."""
+    
+    return config.paths.rendered_pdf_dir / f"{table_name}__{source_format}__{version_label}.pdf"
 
 
 def _print_configuration(config: PipelineConfig) -> None:
