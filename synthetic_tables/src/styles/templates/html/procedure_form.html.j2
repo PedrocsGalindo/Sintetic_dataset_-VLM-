@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ document.title }} - procedure form</title>
+  <style>
+    :root {
+      --page-bg: {{ style.background_color }};
+      --text-color: {{ style.text_color }};
+      --accent-color: {{ style.accent_color }};
+      --border-color: {{ style.border_color }};
+      --header-bg: {{ style.header_background }};
+      --font-family: {{ style.font_family }};
+      --font-size: {{ style.font_size_pt }}pt;
+      --line-height: {{ style.line_height }};
+      --sheet-width: {{ css.sheet_width }};
+      --soft-gray: #ececec;
+      --line-gray: #707070;
+    }
+
+    body {
+      margin: 0;
+      padding: 34px 0;
+      background: #f3f3f3;
+      color: #111111;
+      font-family: {{ style.font_family }}, Arial, sans-serif;
+      font-size: var(--font-size);
+      line-height: var(--line-height);
+    }
+
+    .page {
+      width: var(--sheet-width);
+      margin: 0 auto;
+      background: #ffffff;
+      box-shadow: 0 10px 32px rgba(15, 23, 42, 0.12);
+      padding: 34px 46px 48px 46px;
+      box-sizing: border-box;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 24px;
+      margin-bottom: 26px;
+    }
+
+    .logo-box {
+      width: 340px;
+      min-height: 120px;
+      background: #e8e8e8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #777777;
+      font-size: 2.05rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    .company {
+      flex: 1;
+      text-align: right;
+      padding-top: 4px;
+    }
+
+    .company-type {
+      margin: 0 0 20px 0;
+      color: #d0d0d0;
+      font-size: 1.3rem;
+      font-weight: 400;
+    }
+
+    .company-name {
+      margin: 0 0 6px 0;
+      font-size: 1.18rem;
+      font-weight: 500;
+    }
+
+    .company-meta {
+      margin: 0 0 6px 0;
+      font-size: 0.86rem;
+    }
+
+    .section-title {
+      margin: 24px 0 8px 0;
+      font-size: 1.04rem;
+      font-weight: 700;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .info-table td,
+    .steps-table td,
+    .steps-table th {
+      border: 1px solid var(--line-gray);
+      padding: 6px 8px;
+      vertical-align: top;
+    }
+
+    .info-label {
+      width: 16%;
+      background: #ffffff;
+      font-weight: 500;
+    }
+
+    .info-value {
+      width: 34%;
+      color: #222222;
+    }
+
+    .block {
+      margin-top: 18px;
+    }
+
+    .block-header {
+      background: var(--soft-gray);
+      padding: 7px 10px;
+      font-size: 0.96rem;
+      font-weight: 500;
+    }
+
+    .block-body {
+      padding: 10px 10px 18px 10px;
+      min-height: 66px;
+      font-size: 0.95rem;
+    }
+
+    .steps-table thead th {
+      background: var(--soft-gray);
+      text-align: center;
+      font-size: 0.96rem;
+      font-weight: 500;
+    }
+
+    .steps-table tbody td:nth-child(1) {
+      width: 16%;
+      text-align: center;
+    }
+
+    .steps-table tbody td:nth-child(2) {
+      width: 60%;
+    }
+
+    .steps-table tbody td:nth-child(3) {
+      width: 24%;
+    }
+  </style>
+</head>
+<body>
+  <section class="page">
+    <header class="topbar">
+      <div class="logo-box">{{ document.procedure.logo_text }}</div>
+      <div class="company">
+        <p class="company-type">{{ document.procedure.document_type }}</p>
+        <h1 class="company-name">{{ document.procedure.company_name }}</h1>
+        <p class="company-meta">{{ document.procedure.company_address }}</p>
+        <p class="company-meta">{{ document.procedure.company_contact }}</p>
+      </div>
+    </header>
+
+    <h2 class="section-title">Informacoes gerais</h2>
+    <table class="info-table" aria-label="Informacoes gerais">
+      <tbody>
+        {% for row in document.procedure.info_rows %}
+        <tr>
+          <td class="info-label">{{ row.left.label }}:</td>
+          <td class="info-value">{{ row.left.value }}</td>
+          <td class="info-label">{{ row.right.label }}:</td>
+          <td class="info-value">{{ row.right.value }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2 class="section-title">Visao geral do processo</h2>
+    {% for section in document.procedure.overview_sections %}
+    <section class="block">
+      <div class="block-header">{{ section.title }}:</div>
+      <div class="block-body">{{ section.body }}</div>
+    </section>
+    {% endfor %}
+
+    <h2 class="section-title">Etapas do processo</h2>
+    <table class="steps-table" aria-label="Etapas do processo">
+      <thead>
+        <tr>
+          <th>EAP</th>
+          <th>Tarefa</th>
+          <th>Proprietario</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for step in document.procedure.steps %}
+        <tr>
+          <td>{{ step.eap }}</td>
+          <td>{{ step.task }}</td>
+          <td>{{ step.owner }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</body>
+</html>

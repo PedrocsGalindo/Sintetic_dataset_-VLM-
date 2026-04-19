@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ document.title }} - stream layout</title>
+  <style>
+    :root {
+      --page-bg: {{ style.background_color }};
+      --text-color: {{ style.text_color }};
+      --accent-color: {{ style.accent_color }};
+      --border-color: {{ style.border_color }};
+      --header-bg: {{ style.header_background }};
+      --font-family: {{ style.font_family }};
+      --font-size: {{ style.font_size_pt }}pt;
+      --line-height: {{ style.line_height }};
+      --sheet-width: {{ css.sheet_width }};
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.52), transparent 22%),
+        linear-gradient(180deg, #eef4fa 0%, var(--page-bg) 100%);
+      color: var(--text-color);
+      font-family: var(--font-family), serif;
+      font-size: var(--font-size);
+      line-height: var(--line-height);
+    }
+
+    .stream-sheet {
+      width: var(--sheet-width);
+      margin: 0 auto;
+      background: #ffffff;
+      border: 1px {{ css.border_style }} var(--border-color);
+      padding: 20px;
+      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+    }
+
+    .title {
+      margin: 0 0 8px 0;
+      color: var(--accent-color);
+      font-size: calc(var(--font-size) * 1.26);
+    }
+
+    .subtitle {
+      margin: 0 0 18px 0;
+      max-width: 90ch;
+      opacity: 0.78;
+    }
+
+    .stream {
+      display: grid;
+      gap: 10px;
+    }
+
+    .stream-line {
+      padding: 12px 14px;
+      border-left: 4px solid var(--accent-color);
+      background: linear-gradient(90deg, rgba(220, 235, 250, 0.58), rgba(255,255,255,0.96) 24%);
+      box-shadow: inset 0 -1px 0 rgba(92, 107, 122, 0.14);
+    }
+
+    .line-label {
+      display: inline-block;
+      min-width: 110px;
+      margin-right: 10px;
+      font-weight: 700;
+      color: var(--accent-color);
+    }
+
+    .segment {
+      display: inline;
+    }
+
+    .segment-label {
+      font-weight: 700;
+    }
+
+    .divider {
+      opacity: 0.42;
+      margin: 0 8px;
+    }
+  </style>
+</head>
+<body>
+  <section class="stream-sheet">
+    <h1 class="title">{{ document.title }}</h1>
+    <p class="subtitle">{{ document.subtitle }}</p>
+    <section class="stream">
+      {% for row in document.stream_rows %}
+      <p class="stream-line">
+        <span class="line-label">{{ row.label }}</span>
+        {% for segment in row.segments %}
+        <span class="segment">
+          <span class="segment-label">{{ segment.label }}:</span>
+          <span>{{ segment.value }}</span>
+        </span>
+        {% if not loop.last %}<span class="divider">|</span>{% endif %}
+        {% endfor %}
+      </p>
+      {% endfor %}
+    </section>
+  </section>
+</body>
+</html>
