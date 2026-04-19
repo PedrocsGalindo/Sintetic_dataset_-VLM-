@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from dataclasses import dataclass
-from html import escape
+from html import escape, unescape
 from html.parser import HTMLParser
 import re
 from pathlib import Path
@@ -144,11 +145,13 @@ class PDFRenderer:
         if normalized_format == "html":
             renderer_name = self.render_html(source_path, output_path)
         elif normalized_format == "markdown":
-            renderer_name = "reportlab-markdown-safe"
             markdown_text = source_path.read_text(encoding="utf-8")
             html_document = self._markdown_to_html_document(markdown_text, source_path.stem)
-            parsed_document = self._parse_html_document(html_document, source_path.stem)
-            self._render_html_table_to_pdf(parsed_document, output_path)
+            renderer_name = self._render_generated_html_document(
+                html_content=html_document,
+                output_path=output_path,
+                source_stem=source_path.stem,
+            )
         elif normalized_format == "latex":
             renderer_name = self._latex_to_pdf(source_path, output_path)
         else:
@@ -174,6 +177,14 @@ class PDFRenderer:
         sanitized_html = self._sanitize_html_for_pdf(html_source)
         self._html_to_pdf(sanitized_html, output_path)
         return "xhtml2pdf-html-fallback"
+
+    def _render_generated_html_document(self, html_content: str, output_path: Path, source_stem: str) -> str:
+        """Render generated HTML content through the same high-fidelity HTML pipeline."""
+
+        with TemporaryDirectory() as temp_dir:
+            temp_html_path = Path(temp_dir) / f"{source_stem}.html"
+            temp_html_path.write_text(html_content, encoding="utf-8")
+            return self.render_html(temp_html_path, output_path)
 
     def _html_to_pdf(self, html_content: str, output_path: Path) -> None:
         """Render an HTML string to PDF using xhtml2pdf."""
@@ -299,8 +310,19 @@ class PDFRenderer:
             ".sidebar, .article-stack, .record-list, .note-stack, .block-grid, .stream-band, .ribbon {"
             "min-width: 0 !important;"
             "}"
+            ".md-section, .md-block-grid, .md-block, .md-block-identity, .md-block-body, .md-block-flow, .md-fragment, .md-fragment-body, .md-fragment-pair {"
+            "min-width: 0 !important;"
+            "}"
             ".stream-line, .ribbon-row, .inline-summary, .article-block, .record-card, .sidebar-card, .mini-card, .note-card, .field-card, .block, .stat {"
             "max-width: 100% !important;"
+            "}"
+            ".keep-together {"
+            "break-inside: avoid-page !important;"
+            "page-break-inside: avoid !important;"
+            "}"
+            ".md-section > h2, .md-block-identity, .md-fragment > h4, .section-marker, .line-callout {"
+            "break-after: avoid-page !important;"
+            "page-break-after: avoid !important;"
             "}"
             "img, svg, canvas, table {"
             "max-width: 100% !important;"
@@ -363,13 +385,629 @@ class PDFRenderer:
             return "xhtml2pdf-latex-fallback"
 
     def _markdown_to_html_document(self, markdown_text: str, title: str) -> str:
-        """Convert Markdown text into a simple HTML document."""
+        """Convert Markdown text into a standalone HTML document for browser-grade PDF rendering."""
 
-        rendered_body = markdown_lib.markdown(markdown_text, extensions=["tables"])
-        return (
-            "<!DOCTYPE html><html><head><meta charset='utf-8'></head>"
-            f"<body>{rendered_body}</body></html>"
+        style_meta, cleaned_markdown = self._extract_markdown_style_metadata(markdown_text)
+        rendered_body = markdown_lib.markdown(cleaned_markdown, extensions=["tables", "fenced_code"])
+        theme_name = self._markdown_theme_name(style_meta.get("template_name", "default_markdown"))
+        resolved_title = title.replace("_", " ").title()
+        document_title, body_without_title = self._extract_markdown_title(rendered_body, resolved_title)
+        intro_html, sections = self._split_markdown_sections(body_without_title)
+        css = self._markdown_theme_css(style_meta, theme_name)
+        body_html = self._compose_markdown_theme_body(
+            title=document_title,
+            intro_html=intro_html,
+            sections=sections,
+            theme_name=theme_name,
+            style_meta=style_meta,
         )
+        escaped_title = escape(document_title)
+        return (
+            "<!DOCTYPE html>"
+            "<html lang='en'>"
+            "<head>"
+            "<meta charset='utf-8'>"
+            f"<title>{escaped_title}</title>"
+            f"<style>{css}</style>"
+            "</head>"
+            f"<body class='markdown-theme theme-{theme_name}'>"
+            f"{body_html}"
+            "</body>"
+            "</html>"
+        )
+
+    def _extract_markdown_style_metadata(self, markdown_text: str) -> tuple[dict[str, object], str]:
+        """Parse structured Markdown style metadata embedded at the top of the document."""
+
+        metadata: dict[str, object] = {}
+        cleaned_markdown = markdown_text
+        comment_match = re.match(r"\s*<!--\s*(.*?)\s*-->\s*\n?", markdown_text, flags=re.DOTALL)
+        if comment_match is None:
+            return self._normalized_markdown_style_metadata(metadata), cleaned_markdown
+
+        comment_body = comment_match.group(1).strip()
+        cleaned_markdown = markdown_text[comment_match.end():]
+        if comment_body.startswith("markdown-style:"):
+            payload = comment_body.partition(":")[2].strip()
+            try:
+                parsed = json.loads(payload)
+                if isinstance(parsed, dict):
+                    metadata = parsed
+            except json.JSONDecodeError:
+                metadata = {}
+        elif comment_body.startswith("style:"):
+            legacy_payload = [part.strip() for part in comment_body.partition(":")[2].split("/") if part.strip()]
+            if len(legacy_payload) >= 3:
+                metadata = {
+                    "font_family": legacy_payload[0],
+                    "alignment_profile": legacy_payload[1],
+                    "template_name": legacy_payload[2],
+                }
+
+        return self._normalized_markdown_style_metadata(metadata), cleaned_markdown
+
+    def _normalized_markdown_style_metadata(self, metadata: dict[str, object]) -> dict[str, object]:
+        """Fill missing Markdown style metadata with stable defaults."""
+
+        defaults: dict[str, object] = {
+            "template_name": "default_markdown",
+            "font_family": "serif",
+            "font_size_pt": 11,
+            "line_height": 1.5,
+            "alignment_profile": "mixed",
+            "header_emphasis": "bold",
+            "border_style": "solid",
+            "text_color": "#1F2933",
+            "header_background": "#DCEBFA",
+            "border_color": "#5C6B7A",
+            "background_color": "#FFFFFF",
+            "accent_color": "#2C5282",
+            "table_width": "92%",
+            "zebra_striping": True,
+        }
+        normalized = defaults | metadata
+        normalized["template_name"] = str(normalized["template_name"])
+        normalized["font_family"] = str(normalized["font_family"])
+        normalized["alignment_profile"] = str(normalized["alignment_profile"])
+        normalized["header_emphasis"] = str(normalized["header_emphasis"])
+        normalized["border_style"] = str(normalized["border_style"])
+        normalized["text_color"] = str(normalized["text_color"])
+        normalized["header_background"] = str(normalized["header_background"])
+        normalized["border_color"] = str(normalized["border_color"])
+        normalized["background_color"] = str(normalized["background_color"])
+        normalized["accent_color"] = str(normalized["accent_color"])
+        normalized["table_width"] = str(normalized["table_width"])
+        normalized["font_size_pt"] = int(float(normalized["font_size_pt"]))
+        normalized["line_height"] = float(normalized["line_height"])
+        normalized["zebra_striping"] = bool(normalized["zebra_striping"])
+        return normalized
+
+    @staticmethod
+    def _markdown_theme_name(template_name: str) -> str:
+        """Map Markdown template names to richer HTML presentation themes."""
+
+        mapping = {
+            "default_markdown": "ledger",
+            "markdown_records": "dossier",
+            "markdown_mixed": "signal",
+            "markdown_briefing": "briefing",
+        }
+        return mapping.get(template_name, "ledger")
+
+    def _extract_markdown_title(self, rendered_body: str, fallback_title: str) -> tuple[str, str]:
+        """Extract the leading H1 as the document title and remove it from the body."""
+
+        match = re.search(r"<h1>(.*?)</h1>", rendered_body, flags=re.DOTALL | re.IGNORECASE)
+        if match is None:
+            return fallback_title, rendered_body
+
+        title_html = match.group(1)
+        title_text = unescape(re.sub(r"<.*?>", "", title_html)).strip() or fallback_title
+        cleaned_body = rendered_body[:match.start()] + rendered_body[match.end():]
+        return title_text, cleaned_body.strip()
+
+    def _split_markdown_sections(self, body_html: str) -> tuple[str, list[dict[str, str]]]:
+        """Split rendered Markdown HTML into themed H2 sections."""
+
+        section_heading_pattern = re.compile(r"<h2>(.*?)</h2>", flags=re.DOTALL | re.IGNORECASE)
+        matches = list(section_heading_pattern.finditer(body_html))
+        if not matches:
+            return "", [
+                {
+                    "slug": "document",
+                    "heading_text": "Document",
+                    "heading_html": "",
+                    "content_html": self._wrap_markdown_section_content(body_html),
+                }
+            ]
+
+        intro_html = body_html[: matches[0].start()].strip()
+        sections: list[dict[str, str]] = []
+        for index, match in enumerate(matches):
+            content_start = match.end()
+            content_end = matches[index + 1].start() if index + 1 < len(matches) else len(body_html)
+            heading_html = match.group(0)
+            heading_text = unescape(re.sub(r"<.*?>", "", match.group(1))).strip() or f"Section {index + 1}"
+            sections.append(
+                {
+                    "slug": self._slugify(heading_text),
+                    "heading_text": heading_text,
+                    "heading_html": heading_html,
+                    "content_html": self._wrap_markdown_section_content(body_html[content_start:content_end].strip()),
+                }
+            )
+        return intro_html, sections
+
+    def _wrap_markdown_section_content(self, content_html: str) -> str:
+        """Decorate and group subsection-heavy Markdown HTML into reusable blocks."""
+
+        decorated_html = self._decorate_markdown_section_html(content_html)
+        subsection_pattern = re.compile(r"<h3>(.*?)</h3>", flags=re.DOTALL | re.IGNORECASE)
+        matches = list(subsection_pattern.finditer(decorated_html))
+        if not matches:
+            flow_score = self._estimate_markdown_html_footprint(decorated_html)
+            return (
+                f"<div class='md-flow {self._markdown_footprint_class(flow_score)}"
+                f"{self._markdown_keep_class(flow_score, limit=220)}'>"
+                f"{decorated_html}"
+                "</div>"
+            )
+
+        parts: list[str] = []
+        intro_html = decorated_html[: matches[0].start()].strip()
+        if intro_html:
+            intro_score = self._estimate_markdown_html_footprint(intro_html)
+            parts.append(
+                f"<div class='md-section-intro {self._markdown_footprint_class(intro_score)}"
+                f"{self._markdown_keep_class(intro_score, limit=160)}'>"
+                f"{intro_html}"
+                "</div>"
+            )
+
+        blocks: list[str] = []
+        for index, match in enumerate(matches):
+            block_start = match.end()
+            block_end = matches[index + 1].start() if index + 1 < len(matches) else len(decorated_html)
+            block_title = unescape(re.sub(r"<.*?>", "", match.group(1))).strip() or f"Block {index + 1}"
+            block_content = decorated_html[block_start:block_end].strip()
+            blocks.append(self._render_markdown_block(block_title, match.group(0), block_content))
+
+        parts.append(f"<div class='md-block-grid'>{''.join(blocks)}</div>")
+        return "".join(parts)
+
+    def _render_markdown_block(self, block_title: str, heading_html: str, block_content: str) -> str:
+        """Render one subsection block with grouped keep-together semantics."""
+
+        body_html, block_score = self._wrap_markdown_block_body(block_content)
+        origin_html = f"<p class='md-origin'>{escape(block_title)}</p>" if self._is_record_anchor(block_title) else ""
+        return (
+            f"<article class='md-block block-{self._slugify(block_title)} {self._markdown_footprint_class(block_score)}"
+            f"{self._markdown_keep_class(block_score, limit=260)}'>"
+            "<div class='md-block-identity'>"
+            f"{origin_html}"
+            f"{heading_html}"
+            "</div>"
+            f"<div class='md-block-body'>{body_html}</div>"
+            "</article>"
+        )
+
+    def _wrap_markdown_block_body(self, block_content: str) -> tuple[str, int]:
+        """Group block internals so summary and matrix fragments paginate as one unit when feasible."""
+
+        intro_html, fragments = self._split_markdown_block_fragments(block_content)
+        if not fragments:
+            block_score = self._estimate_markdown_html_footprint(block_content)
+            body_html = (
+                f"<div class='md-block-flow {self._markdown_footprint_class(block_score)}"
+                f"{self._markdown_keep_class(block_score, limit=220)}'>"
+                f"{block_content}"
+                "</div>"
+            )
+            return body_html, block_score
+
+        body_parts: list[str] = []
+        combined_score = 0
+
+        if intro_html:
+            intro_score = self._estimate_markdown_html_footprint(intro_html)
+            combined_score += intro_score
+            body_parts.append(
+                f"<div class='md-block-flow {self._markdown_footprint_class(intro_score)}"
+                f"{self._markdown_keep_class(intro_score, limit=170)}'>"
+                f"{intro_html}"
+                "</div>"
+            )
+
+        buffered_matrix_html: list[str] = []
+        buffered_matrix_score = 0
+        for fragment in fragments:
+            fragment_html, fragment_score, fragment_kind = self._render_markdown_fragment(fragment)
+            if fragment_kind == "matrix":
+                buffered_matrix_html.append(fragment_html)
+                buffered_matrix_score += fragment_score
+                continue
+            if buffered_matrix_html:
+                body_parts.append(
+                    self._render_markdown_fragment_pair(buffered_matrix_html, buffered_matrix_score)
+                )
+                combined_score += buffered_matrix_score
+                buffered_matrix_html = []
+                buffered_matrix_score = 0
+            body_parts.append(fragment_html)
+            combined_score += fragment_score
+
+        if buffered_matrix_html:
+            body_parts.append(self._render_markdown_fragment_pair(buffered_matrix_html, buffered_matrix_score))
+            combined_score += buffered_matrix_score
+
+        return "".join(body_parts), max(combined_score, self._estimate_markdown_html_footprint(block_content))
+
+    def _split_markdown_block_fragments(self, block_content: str) -> tuple[str, list[dict[str, str]]]:
+        """Split one record block into h4-level fragments while preserving leading summary flow."""
+
+        fragment_pattern = re.compile(r"<h4>(.*?)</h4>", flags=re.DOTALL | re.IGNORECASE)
+        matches = list(fragment_pattern.finditer(block_content))
+        if not matches:
+            return block_content, []
+
+        intro_html = block_content[: matches[0].start()].strip()
+        fragments: list[dict[str, str]] = []
+        for index, match in enumerate(matches):
+            fragment_start = match.end()
+            fragment_end = matches[index + 1].start() if index + 1 < len(matches) else len(block_content)
+            fragment_title = unescape(re.sub(r"<.*?>", "", match.group(1))).strip() or f"Fragment {index + 1}"
+            fragments.append(
+                {
+                    "title_text": fragment_title,
+                    "heading_html": match.group(0),
+                    "content_html": block_content[fragment_start:fragment_end].strip(),
+                }
+            )
+        return intro_html, fragments
+
+    def _render_markdown_fragment(self, fragment: dict[str, str]) -> tuple[str, int, str]:
+        """Render one fragment inside a record block with its own footprint estimate."""
+
+        fragment_kind = self._markdown_fragment_kind(fragment["title_text"])
+        fragment_score = self._estimate_markdown_html_footprint(
+            fragment["heading_html"] + fragment["content_html"]
+        )
+        fragment_html = (
+            f"<section class='md-fragment fragment-{fragment_kind} {self._markdown_footprint_class(fragment_score)}"
+            f"{self._markdown_keep_class(fragment_score, limit=150)}'>"
+            f"{fragment['heading_html']}"
+            f"<div class='md-fragment-body'>{fragment['content_html']}</div>"
+            "</section>"
+        )
+        return fragment_html, fragment_score, fragment_kind
+
+    def _render_markdown_fragment_pair(self, fragment_html: list[str], pair_score: int) -> str:
+        """Render a paired fragment cluster that should stay near one record anchor."""
+
+        return (
+            f"<div class='md-fragment-pair pair-matrix {self._markdown_footprint_class(pair_score)}"
+            f"{self._markdown_keep_class(pair_score, limit=220)}'>"
+            f"{''.join(fragment_html)}"
+            "</div>"
+        )
+
+    def _estimate_markdown_html_footprint(self, html_content: str) -> int:
+        """Estimate the final footprint of an assembled Markdown block using rendered HTML features."""
+
+        plain_text = unescape(re.sub(r"<.*?>", " ", html_content))
+        word_count = len(plain_text.split())
+        char_count = len(plain_text)
+        list_items = html_content.count("<li")
+        tables = html_content.count("<table")
+        quotes = html_content.count("md-quote")
+        callouts = html_content.count("line-callout")
+        markers = html_content.count("section-marker")
+        subsections = html_content.count("<h4")
+        code_blocks = html_content.count("<pre")
+        return (
+            max(24, word_count * 4)
+            + min(char_count, 900) // 14
+            + list_items * 10
+            + tables * 72
+            + quotes * 18
+            + callouts * 16
+            + markers * 10
+            + subsections * 14
+            + code_blocks * 28
+        )
+
+    @staticmethod
+    def _markdown_footprint_class(footprint_score: int) -> str:
+        """Map estimated footprint into stable CSS classes."""
+
+        if footprint_score <= 120:
+            return "footprint-compact"
+        if footprint_score <= 220:
+            return "footprint-balanced"
+        if footprint_score <= 320:
+            return "footprint-extended"
+        return "footprint-sprawling"
+
+    @staticmethod
+    def _markdown_keep_class(footprint_score: int, limit: int) -> str:
+        """Keep compact and medium fragments together, but let oversized blocks split naturally."""
+
+        return " keep-together" if footprint_score <= limit else ""
+
+    @staticmethod
+    def _markdown_fragment_kind(title_text: str) -> str:
+        """Classify Markdown fragments so paired matrices can paginate together."""
+
+        normalized = title_text.strip().lower()
+        if normalized.startswith("matrix "):
+            return "matrix"
+        if "free text" in normalized or "narrative" in normalized:
+            return "narrative"
+        if "detail" in normalized:
+            return "details"
+        return "section"
+
+    def _decorate_markdown_section_html(self, html_content: str) -> str:
+        """Add reusable semantic hooks to rendered Markdown HTML."""
+
+        decorated = html_content
+        decorated = decorated.replace("<table>", "<div class='table-shell'><table>")
+        decorated = decorated.replace("</table>", "</table></div>")
+        decorated = decorated.replace("<ul>", "<ul class='md-list'>")
+        decorated = decorated.replace("<ol>", "<ol class='md-list md-list-ordered'>")
+        decorated = decorated.replace("<blockquote>", "<blockquote class='md-quote'>")
+        decorated = re.sub(
+            r"<p><strong>(Summary|Insight|Highlight):</strong>\s*",
+            lambda match: (
+                f"<p class='line-callout {self._slugify(match.group(1))}-line'>"
+                f"<span class='line-label'>{match.group(1)}</span> "
+            ),
+            decorated,
+            flags=re.IGNORECASE,
+        )
+        decorated = re.sub(
+            r"<p>(Details|Free Text|Key Fields|Fields):</p>",
+            lambda match: f"<p class='section-marker'>{match.group(1)}</p>",
+            decorated,
+            flags=re.IGNORECASE,
+        )
+        return decorated
+
+    def _compose_markdown_theme_body(
+        self,
+        title: str,
+        intro_html: str,
+        sections: list[dict[str, str]],
+        theme_name: str,
+        style_meta: dict[str, object],
+    ) -> str:
+        """Arrange themed Markdown sections into a richer document shell."""
+
+        summary_sections: list[dict[str, str]] = []
+        main_sections: list[dict[str, str]] = []
+        for section in sections:
+            if self._is_markdown_summary_section(section["slug"]):
+                summary_sections.append(section)
+            else:
+                main_sections.append(section)
+
+        if not main_sections:
+            main_sections = summary_sections
+            summary_sections = []
+
+        summary_strip_html = ""
+        if summary_sections:
+            summary_strip_html = (
+                f"<section class='summary-strip theme-{theme_name}'>"
+                f"{''.join(self._render_markdown_section(section, compact=True) for section in summary_sections)}"
+                "</section>"
+            )
+
+        main_content = (
+            f"<div class='md-content theme-{theme_name}'>"
+            f"{''.join(self._render_markdown_section(section) for section in main_sections)}"
+            "</div>"
+        )
+
+        intro_panel = f"<div class='hero-intro'>{intro_html}</div>" if intro_html.strip() else ""
+        template_label = escape(str(style_meta.get("template_name", "markdown")))
+        return (
+            "<section class='sheet'>"
+            f"<header class='hero theme-{theme_name}'>"
+            f"<p class='eyebrow'>{template_label.replace('_', ' ')}</p>"
+            f"<h1>{escape(title)}</h1>"
+            f"{intro_panel}"
+            "</header>"
+            f"<article class='markdown-body theme-{theme_name}'>"
+            f"{summary_strip_html}"
+            f"{main_content}"
+            "</article>"
+            "</section>"
+        )
+
+    def _render_markdown_section(self, section: dict[str, str], compact: bool = False) -> str:
+        """Render one themed Markdown section container."""
+
+        section_heading = section["heading_html"]
+        section_body = section["content_html"]
+        compact_class = " compact-summary" if compact else ""
+        return (
+            f"<section class='md-section section-{section['slug']}{compact_class}'>"
+            f"{section_heading}"
+            f"<div class='section-frame'>{section_body}</div>"
+            "</section>"
+        )
+
+    def _markdown_theme_css(self, style_meta: dict[str, object], theme_name: str) -> str:
+        """Return theme-specific CSS for Markdown-derived HTML documents."""
+
+        font_stack = self._markdown_font_stack(str(style_meta["font_family"]))
+        page_bg = str(style_meta["background_color"])
+        text_color = str(style_meta["text_color"])
+        accent_color = str(style_meta["accent_color"])
+        border_color = str(style_meta["border_color"])
+        header_background = str(style_meta["header_background"])
+        font_size = int(style_meta["font_size_pt"])
+        line_height = float(style_meta["line_height"])
+        table_width = str(style_meta["table_width"])
+        zebra = "rgba(148,163,184,0.08)" if bool(style_meta["zebra_striping"]) else "#ffffff"
+        title_transform = "uppercase" if str(style_meta["header_emphasis"]) in {"caps", "smallcaps"} else "none"
+        heading_letter_spacing = "0.08em" if str(style_meta["header_emphasis"]) == "caps" else "0.02em"
+        border_radius = "0" if str(style_meta["border_style"]) == "minimal" else "18px" if str(style_meta["border_style"]) == "double" else "10px"
+        border_style = "dashed" if str(style_meta["border_style"]) == "dashed" else "solid"
+
+        theme_widths = {
+            "ledger": "min(1040px, 95vw)",
+            "dossier": "min(1180px, 96vw)",
+            "signal": "min(1160px, 95vw)",
+            "briefing": "min(1120px, 95vw)",
+        }
+        sheet_width = theme_widths.get(theme_name, "min(1080px, 95vw)")
+
+        return "".join(
+            [
+                ":root{",
+                f"--page-bg:{page_bg};",
+                f"--text-color:{text_color};",
+                f"--accent-color:{accent_color};",
+                f"--border-color:{border_color};",
+                f"--header-bg:{header_background};",
+                f"--sheet-width:{sheet_width};",
+                f"--table-width:{table_width};",
+                f"--font-family:{font_stack};",
+                f"--font-size:{font_size}pt;",
+                f"--line-height:{line_height};",
+                f"--radius:{border_radius};",
+                f"--border-style:{border_style};",
+                "}",
+                "body{",
+                "margin:0;",
+                "padding:24px;",
+                "background:linear-gradient(180deg, rgba(255,255,255,0.78), transparent 18%), linear-gradient(180deg, #eef4f8 0%, var(--page-bg) 100%);",
+                "color:var(--text-color);",
+                "font-family:var(--font-family);",
+                "font-size:var(--font-size);",
+                "line-height:var(--line-height);",
+                "}",
+                ".sheet{",
+                "width:var(--sheet-width);",
+                "margin:0 auto;",
+                "padding:22px;",
+                "background:rgba(255,255,255,0.98);",
+                "border:1px var(--border-style) var(--border-color);",
+                "box-shadow:0 14px 34px rgba(15,23,42,0.08);",
+                "}",
+                ".hero{margin:0 0 20px 0;}",
+                ".hero h1{margin:0;color:var(--accent-color);font-size:2.1em;line-height:1.05;text-transform:",
+                title_transform,
+                ";letter-spacing:",
+                heading_letter_spacing,
+                ";}",
+                ".eyebrow{margin:0 0 10px 0;font-size:0.76em;text-transform:uppercase;letter-spacing:0.12em;color:var(--accent-color);opacity:0.74;}",
+                ".hero-intro{margin-top:12px;max-width:72ch;color:#556270;}",
+                ".hero-intro > *:last-child{margin-bottom:0;}",
+                ".markdown-body{display:grid;gap:18px;}",
+                ".summary-strip{display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:14px;align-items:start;}",
+                ".md-content{display:grid;gap:16px;min-width:0;}",
+                ".md-section{min-width:0;}",
+                ".md-section > h2{margin:0 0 12px 0;color:var(--accent-color);font-size:1.26em;line-height:1.15;}",
+                ".section-frame{padding:16px;background:rgba(255,255,255,0.94);border:1px solid rgba(92,107,122,0.18);}",
+                ".compact-summary > h2{margin-bottom:8px;font-size:1.02em;}",
+                ".compact-summary .section-frame{padding:12px 14px;min-height:0;}",
+                ".md-flow,.md-section-intro,.md-block,.md-block-identity,.md-block-body,.md-block-flow,.md-fragment,.md-fragment-body,.md-fragment-pair{min-width:0;}",
+                ".md-flow > *:first-child,.md-section-intro > *:first-child,.md-block-flow > *:first-child,.md-fragment-body > *:first-child{margin-top:0;}",
+                ".md-flow > *:last-child,.md-section-intro > *:last-child,.md-block-flow > *:last-child,.md-fragment-body > *:last-child{margin-bottom:0;}",
+                ".md-block-grid{display:grid;gap:14px;}",
+                ".md-block{padding:14px;background:linear-gradient(180deg, rgba(255,255,255,0.98), rgba(247,250,252,0.94));border-top:3px solid var(--accent-color);border-left:1px solid rgba(92,107,122,0.18);border-right:1px solid rgba(92,107,122,0.18);border-bottom:1px solid rgba(92,107,122,0.18);}",
+                ".md-block-identity{display:grid;gap:4px;margin-bottom:10px;break-after:avoid-page;page-break-after:avoid;}",
+                ".md-block-body{display:grid;gap:12px;}",
+                ".md-block-flow,.md-fragment,.md-fragment-pair{display:grid;gap:10px;}",
+                ".md-fragment{padding-top:10px;border-top:1px solid rgba(92,107,122,0.16);}",
+                ".md-fragment:first-child{padding-top:0;border-top:none;}",
+                ".md-fragment-body{display:grid;gap:8px;}",
+                ".md-fragment-pair{padding:10px 12px;background:rgba(248,250,252,0.7);border:1px solid rgba(92,107,122,0.14);}",
+                ".keep-together{break-inside:avoid-page;page-break-inside:avoid;}",
+                ".md-section > h2,.md-block > h3,.md-fragment > h4,.section-marker,.line-callout{break-after:avoid-page;page-break-after:avoid;}",
+                ".md-origin{margin:0 0 6px 0;font-size:0.74em;text-transform:uppercase;letter-spacing:0.08em;color:var(--accent-color);opacity:0.78;}",
+                ".md-block > h3{margin:0;font-size:1em;color:var(--text-color);}",
+                ".md-block h4,.md-flow h4{margin:0 0 8px 0;font-size:0.78em;text-transform:uppercase;letter-spacing:0.12em;color:var(--accent-color);}",
+                ".md-list{margin:0;padding-left:1.2em;}",
+                ".md-list li{margin:0.28em 0;}",
+                ".line-callout{margin:0 0 10px 0;padding:10px 12px;background:linear-gradient(90deg, rgba(220,235,250,0.56), rgba(255,255,255,0.98) 24%);border-left:4px solid var(--accent-color);}",
+                ".line-label{display:inline-block;margin-right:8px;font-weight:700;color:var(--accent-color);text-transform:uppercase;letter-spacing:0.06em;font-size:0.76em;}",
+                ".section-marker{margin:0 0 8px 0;font-size:0.75em;text-transform:uppercase;letter-spacing:0.12em;color:var(--accent-color);}",
+                ".table-shell{max-width:100%;margin:1em 0 0;overflow:hidden;border:1px solid rgba(92,107,122,0.2);}",
+                ".markdown-body table{width:100%;border-collapse:collapse;table-layout:auto;margin:0;}",
+                ".markdown-body th,.markdown-body td{border:1px solid rgba(92,107,122,0.2);padding:8px 10px;vertical-align:top;overflow-wrap:anywhere;}",
+                ".markdown-body th{background:var(--header-bg);font-weight:700;text-align:left;}",
+                ".markdown-body tbody tr:nth-child(even) td{background:",
+                zebra,
+                ";}",
+                ".md-quote{margin:0 0 12px 0;padding:12px 14px;background:rgba(220,235,250,0.36);border-left:4px solid var(--accent-color);color:#5b6775;}",
+                ".markdown-body code{padding:0.08em 0.32em;border-radius:4px;background:rgba(226,232,240,0.7);font-family:'Courier New', monospace;font-size:0.94em;}",
+                ".markdown-body pre{margin:0 0 12px 0;padding:12px 14px;background:#f8fafc;border:1px solid rgba(92,107,122,0.18);overflow:auto;}",
+                ".markdown-body pre code{padding:0;background:transparent;}",
+                ".markdown-body hr{border:none;border-top:1px solid rgba(92,107,122,0.18);margin:1.25em 0;}",
+                ".theme-ledger .hero{padding:0 0 14px 0;border-bottom:2px solid rgba(92,107,122,0.16);}",
+                ".theme-ledger .section-frame{padding:0;background:transparent;border:none;}",
+                ".theme-ledger .table-shell{margin-top:0;border-width:0 0 1px 0;}",
+                ".theme-ledger .md-block-grid{grid-template-columns:1fr;}",
+                ".theme-dossier .hero{display:grid;gap:12px;align-items:end;}",
+                ".theme-dossier .hero-intro{padding:12px 14px;background:linear-gradient(180deg, rgba(220,235,250,0.4), rgba(255,255,255,0.98));border:1px solid rgba(92,107,122,0.18);}",
+                ".theme-dossier .summary-strip .md-list{display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:8px;list-style:none;padding:0;}",
+                ".theme-dossier .summary-strip .md-list li{margin:0;padding:10px 12px;border:1px solid rgba(92,107,122,0.16);background:rgba(248,250,252,0.92);}",
+                ".theme-dossier .section-records .md-block-grid,.theme-dossier .section-record-notes .md-block-grid{grid-template-columns:repeat(2, minmax(0,1fr));}",
+                ".theme-signal .hero{padding:16px 18px;background:linear-gradient(135deg, rgba(220,235,250,0.72), rgba(255,255,255,0.96));border-left:6px solid var(--accent-color);}",
+                ".theme-signal .md-section > h2{padding-bottom:6px;border-bottom:1px solid rgba(92,107,122,0.16);}",
+                ".theme-signal .summary-strip .md-list{display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:8px;list-style:none;padding:0;}",
+                ".theme-signal .summary-strip .md-list li{margin:0;padding:10px 12px;border:1px solid rgba(92,107,122,0.18);background:rgba(255,255,255,0.96);}",
+                ".theme-signal .section-record-notes .md-block{border-top-width:4px;}",
+                ".theme-signal .section-record-notes .md-block-grid{grid-template-columns:repeat(2, minmax(0,1fr));gap:12px;}",
+                ".theme-briefing .hero{padding:18px 20px;background:linear-gradient(180deg, rgba(255,255,255,0.96), rgba(243,247,252,0.94));border-top:4px solid var(--accent-color);}",
+                ".theme-briefing .hero h1{font-size:2.24em;}",
+                ".theme-briefing .summary-strip{grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));}",
+                ".theme-briefing .summary-strip .section-frame{background:linear-gradient(180deg, rgba(220,235,250,0.34), rgba(255,255,255,0.98));}",
+                ".theme-briefing .section-highlights .md-block-grid{grid-template-columns:repeat(2, minmax(0,1fr));}",
+                ".theme-briefing .section-full-index .md-list{display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:10px;padding-left:0;list-style:none;}",
+                ".theme-briefing .section-full-index .md-list li{margin:0;padding:10px 12px;border-bottom:1px dashed rgba(92,107,122,0.24);background:rgba(255,255,255,0.9);}",
+                ".theme-briefing .section-highlights .md-origin{margin-bottom:4px;}",
+            ]
+        )
+
+    @staticmethod
+    def _markdown_font_stack(font_family: str) -> str:
+        """Map sampled Markdown font families to browser-friendly stacks."""
+
+        normalized = font_family.strip().lower()
+        if normalized == "serif":
+            return "Georgia, 'Times New Roman', serif"
+        if normalized == "sans-serif":
+            return "'Trebuchet MS', Verdana, sans-serif"
+        if normalized == "monospace":
+            return "'Courier New', Consolas, monospace"
+        if "garamond" in normalized:
+            return "Garamond, Georgia, serif"
+        if "verdana" in normalized or "tahoma" in normalized:
+            return f"'{font_family}', Verdana, sans-serif"
+        return f"'{font_family}', Georgia, serif"
+
+    @staticmethod
+    def _slugify(text: str) -> str:
+        """Convert heading text into a stable CSS-friendly slug."""
+
+        return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "section"
+
+    @staticmethod
+    def _is_markdown_summary_section(slug: str) -> bool:
+        """Identify Markdown sections that should be promoted into the compact top summary band."""
+
+        return slug in {"dataset-snapshot", "overview", "briefing"}
+
+    @staticmethod
+    def _is_record_anchor(text: str) -> bool:
+        """Identify subsection headings that act as row-traceable record anchors."""
+
+        return bool(re.match(r"record\s+\d+", text.strip(), flags=re.IGNORECASE))
 
     def _parse_html_document(self, html_content: str, fallback_title: str) -> ParsedTableDocument:
         """Extract the first table and normalize its rows for PDF-safe rendering."""
