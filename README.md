@@ -93,7 +93,13 @@ python -m venv synthetic_tables/.venv
 synthetic_tables\.venv\Scripts\python.exe -m pip install -r synthetic_tables/requirements.txt
 ```
 
-3. Optional: verify the `venv` is the one being used:
+3. Install the Chromium runtime used by the default HTML -> PDF renderer:
+
+```bash
+synthetic_tables\.venv\Scripts\python.exe -m playwright install chromium
+```
+
+4. Optional: verify the `venv` is the one being used:
 
 ```bash
 synthetic_tables\.venv\Scripts\python.exe -m pip list
@@ -214,11 +220,14 @@ synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py ^
 
 ### Rendering stack
 
-- HTML -> PDF via `xhtml2pdf`
-- Markdown -> HTML -> PDF via `markdown` + `xhtml2pdf`
+- HTML -> PDF via `playwright` + Chromium
+- HTML fallback -> PDF via `weasyprint`
+- HTML emergency fallback -> PDF via `xhtml2pdf`
+- Markdown -> HTML -> PDF via `markdown` + internal `reportlab` table rendering
 - PDF -> image via `pypdfium2`
 - LaTeX -> PDF via `pdflatex` when available
-- LaTeX fallback -> PDF preview via `xhtml2pdf` when `pdflatex` is unavailable or fails
+- LaTeX fallback -> PDF preview via `reportlab` when table extraction succeeds
+- LaTeX emergency fallback -> PDF preview via `xhtml2pdf` when `pdflatex` is unavailable or fails
 
 ## Requirements Notes
 
@@ -227,11 +236,18 @@ synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py ^
 - `openpyxl` for XLSX export
 - `Jinja2` for HTML and LaTeX templates
 - `markdown` for Markdown-to-HTML conversion
-- `xhtml2pdf` for PDF generation in the current environment
+- `playwright` for the default high-fidelity HTML-to-PDF path
+- `weasyprint` for the higher-fidelity HTML fallback path
+- `reportlab` for Markdown PDF rendering and structured fallback PDFs
+- `xhtml2pdf` for emergency HTML/LaTeX fallback rendering
 - `pypdfium2` for PDF rasterization
 - `Pillow` for image output support
 
-`weasyprint` and `pdf2image` were considered earlier, but in this environment the chosen stack is more reliable and easier to install.
+Browser/runtime notes:
+
+- Playwright needs a browser install step such as `python -m playwright install chromium`
+- WeasyPrint may also require native text/layout libraries on some systems; if those are missing, the renderer falls through to the next supported fallback
+- `xhtml2pdf` is intentionally still installed because the code keeps it as the final fallback, so it was not removed from the supported stack
 
 ## Limitations
 
@@ -239,7 +255,7 @@ Current limitations of the project:
 
 - the pipeline generates synthetic tables, but not OCR annotations yet
 - LaTeX PDF generation depends on `pdflatex`; without it, the pipeline uses a fallback preview renderer
-- HTML is simplified before PDF generation because `xhtml2pdf` does not support all advanced CSS features
+- HTML keeps its approved layout on the default Playwright path, but fallback renderers may still simplify layout if browser-grade rendering is unavailable
 - page layouts are still table-centric, with one table per rendered document
 - visual noise and document degradation are not yet modeled
 - metadata focuses on file artifacts and generation settings, not geometric supervision
