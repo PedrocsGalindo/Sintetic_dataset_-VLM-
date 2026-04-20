@@ -1,50 +1,121 @@
 \documentclass[10pt]{article}
-\usepackage[margin=1in]{geometry}
-\usepackage[table]{xcolor}
-\usepackage{array}
-\usepackage{longtable}
+\usepackage[{{ latex.geometry_options }}]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
+\usepackage[table]{xcolor}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\definecolor{CompatAccent}{RGB}{ {{ latex.accent_rgb }} }
+\definecolor{CompatHeader}{RGB}{ {{ latex.header_rgb }} }
+\definecolor{CompatBorder}{RGB}{ {{ latex.border_rgb }} }
+\definecolor{CompatBody}{RGB}{ {{ latex.text_rgb }} }
+\color{CompatBody}
 \renewcommand{\arraystretch}{ {{ latex.arraystretch }} }
 \setlength{\tabcolsep}{ {{ latex.tabcolsep_pt }}pt }
 \begin{document}
 \pagestyle{empty}
-\noindent{\Large {{ table.name_escaped }}}\\[8pt]
-{% if style.zebra_striping %}
-\rowcolors{2}{gray!10}{white}
-{% endif %}
-\begin{longtable}{ {{ latex.column_spec }} }
-{% if latex.has_horizontal_rules %}
-\hline
-{% endif %}
-{% for column in columns -%}
-{{ column.header_escaped }}{% if not loop.last %} & {% endif %}
+% LATEX_RENDER_MODE: safe-preview
+% PDF_TITLE: {{ latex.title_comment_escaped }}
+
+\noindent{\Large\bfseries {{ table.display_name_escaped }}}\\[4pt]
+{\small Compatibility preview for stricter LaTeX environments. This mode avoids advanced chart and box packages while preserving the overview-plus-details document structure.}\\[8pt]
+
+\noindent
+\begin{minipage}[t]{0.48\linewidth}
+\fcolorbox{CompatBorder!60}{CompatHeader!20}{
+\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}{
+\small\textbf{Rows:} {{ table.rows }}\\[3pt]
+\textbf{Columns:} {{ table.columns }}\\[3pt]
+\textbf{Mode:} safe-preview\\[3pt]
+Page 1 stays compact before the detailed tables begin.
+}
+}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\linewidth}
+\fcolorbox{CompatBorder!60}{white}{
+\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}{
+\small\textbf{Chart note}\\[3pt]
+Compatibility mode omits `pgfplots` and other higher-risk packages so stricter LaTeX environments can still compile a structured PDF.
+}
+}
+\end{minipage}
+
+\vspace{8pt}
+{% if preview_table %}
+\noindent\textbf{ {{ preview_table.title_escaped }} }\\[3pt]
+{\small {{ preview_table.subtitle_escaped }}}\\[4pt]
+\footnotesize
+\rowcolors{2}{CompatHeader!10}{white}
+\begin{tabularx}{\linewidth}{ {{ preview_table.column_spec }} }
+\toprule
+{% for header in preview_table.headers -%}
+\textbf{ {{ header }} }{% if not loop.last %} & {% endif %}
 {%- endfor %} \\
-{% if latex.has_horizontal_rules %}
-\hline
-{% endif %}
-\endfirsthead
-{% if latex.has_horizontal_rules %}
-\hline
-{% endif %}
-{% for column in columns -%}
-{{ column.header_escaped }}{% if not loop.last %} & {% endif %}
-{%- endfor %} \\
-{% if latex.has_horizontal_rules %}
-\hline
-{% endif %}
-\endhead
-{% for row in rows -%}
+\midrule
+{% for row in preview_table.rows -%}
 {% for cell in row -%}
 {{ cell }}{% if not loop.last %} & {% endif %}
 {%- endfor %} \\
-{% if latex.has_horizontal_rules and style.border_style == "double" %}
-\hline
-{% endif %}
 {% endfor %}
-{% if latex.has_horizontal_rules %}
-\hline
+\bottomrule
+\end{tabularx}
+\normalsize
 {% endif %}
+
+\clearpage
+\section*{Detailed Tables}
+\noindent\textit{Detailed content is moved to later pages and split into smaller sections when the schema is wide.}
+
+{% for section in latex.detail_sections %}
+\subsection*{ {{ section.title_escaped }} }
+\noindent\textit{ {{ section.subtitle_escaped }} }
+
+{{ section.font_command }}
+\rowcolors{2}{CompatHeader!10}{white}
+\begin{longtable}{ {{ section.column_spec }} }
+\toprule
+{% for column in section.columns -%}
+{{ column.header_escaped }}{% if not loop.last %} & {% endif %}
+{%- endfor %} \\
+\midrule
+\endfirsthead
+\toprule
+{% for column in section.columns -%}
+{{ column.header_escaped }}{% if not loop.last %} & {% endif %}
+{%- endfor %} \\
+\midrule
+\endhead
+{% for row in section.rows -%}
+{% for cell in row -%}
+{{ cell }}{% if not loop.last %} & {% endif %}
+{%- endfor %} \\
+{% endfor %}
+\bottomrule
 \end{longtable}
+\normalsize
+{% endfor %}
+
+% PDF_FALLBACK_TABLE_BEGIN
+% {{ latex.full_index_font }}
+% \rowcolors{2}{CompatHeader!10}{white}
+% \begin{longtable}{ {{ latex.full_index_column_spec }} }
+% \toprule
+% {{ columns | map(attribute='header_escaped') | join(' & ') }} \\
+% \midrule
+% \endfirsthead
+% \toprule
+% {{ columns | map(attribute='header_escaped') | join(' & ') }} \\
+% \midrule
+% \endhead
+{% for row in rows -%}
+% {{ row | join(' & ') }} \\
+{% endfor %}
+% \bottomrule
+% \end{longtable}
+% \normalsize
+% PDF_FALLBACK_TABLE_END
+
 \end{document}

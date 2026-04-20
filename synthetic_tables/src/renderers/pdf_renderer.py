@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
+from reportlab.platypus import LongTable, PageBreak, Paragraph, SimpleDocTemplate, Spacer, TableStyle
 
 from utils.io import ensure_parent_dir
 
@@ -40,6 +41,141 @@ class ParsedTableDocument:
     title: str
     headers: list[str]
     rows: list[list[str]]
+
+
+@dataclass(frozen=True)
+class LatexCompileOutcome:
+    """Capture the result of one concrete LaTeX compilation attempt."""
+
+    engine_name: str
+    engine_path: str
+    source_name: str
+    success: bool
+    pdf_bytes: bytes | None
+    log_text: str
+    summary: str
+
+
+@dataclass(frozen=True)
+class LatexDiagnosticBundle:
+    """Describe the artifacts produced by a single LaTeX smoke-test run."""
+
+    source_path: Path
+    source_copy_path: Path
+    report_path: Path
+    native_pdf_path: Path | None
+    safe_preview_pdf_path: Path | None
+    fallback_pdf_path: Path
+    preferred_renderer: str | None
+    fallback_renderer: str
+    attempts: tuple[dict[str, str | bool | None], ...]
+
+
+class LatexRenderError(RuntimeError):
+    """Base class for structured LaTeX PDF rendering failures."""
+
+    error_code = "latex_render_error"
+
+    def to_dict(self) -> dict[str, object]:
+        """Expose a stable machine-readable payload for callers and logs."""
+
+        return {
+            "error": self.error_code,
+            "message": str(self),
+        }
+
+
+class LatexEngineRequiredError(LatexRenderError):
+    """Raised when LaTeX rendering is requested without a supported TeX engine."""
+
+    error_code = "latex_engine_required"
+
+    def __init__(
+        self,
+        *,
+        source_path: Path,
+        searched_executables: tuple[str, ...],
+        engine_env_vars: dict[str, tuple[str, ...]],
+        search_locations: tuple[str, ...],
+        windows_install_hint: str,
+    ) -> None:
+        self.source_path = source_path
+        self.searched_executables = searched_executables
+        self.engine_env_vars = {
+            engine_name: tuple(env_vars)
+            for engine_name, env_vars in engine_env_vars.items()
+        }
+        self.search_locations = search_locations
+        self.windows_install_hint = windows_install_hint
+        env_vars_flat = [
+            env_var
+            for engine_name in self.searched_executables
+            for env_var in self.engine_env_vars.get(engine_name, ())
+        ]
+        searched_text = ", ".join(self.searched_executables)
+        env_var_text = " / ".join(env_vars_flat)
+        message = (
+            "LaTeX rendering requires a real TeX engine. "
+            f"No supported engine was found for `{source_path.name}`. "
+            f"Searched executables: {searched_text}. "
+            f"{windows_install_hint} "
+            f"Set an explicit executable path with {env_var_text} if needed."
+        )
+        super().__init__(message)
+
+    def to_dict(self) -> dict[str, object]:
+        """Expose structured context for programmatic error handling."""
+
+        return {
+            **super().to_dict(),
+            "source_format": "latex",
+            "source_path": str(self.source_path),
+            "searched_executables": list(self.searched_executables),
+            "engine_env_vars": {
+                engine_name: list(env_vars)
+                for engine_name, env_vars in self.engine_env_vars.items()
+            },
+            "search_locations": list(self.search_locations),
+            "windows_install_hint": self.windows_install_hint,
+        }
+
+
+class LatexCompilationFailedError(LatexRenderError):
+    """Raised when LaTeX rendering cannot produce a PDF from any TeX-backed attempt."""
+
+    error_code = "latex_compilation_failed"
+
+    def __init__(self, *, source_path: Path, attempts: tuple[LatexCompileOutcome, ...]) -> None:
+        self.source_path = source_path
+        self.attempts = attempts
+        summary_text = "; ".join(
+            f"{attempt.source_name} via {attempt.engine_name}: {attempt.summary}"
+            for attempt in attempts
+        )
+        message = (
+            "LaTeX rendering failed after TeX compilation attempts. "
+            f"Source: `{source_path.name}`. {summary_text}"
+        )
+        super().__init__(message)
+
+    def to_dict(self) -> dict[str, object]:
+        """Expose structured attempt summaries for debugging and logs."""
+
+        return {
+            **super().to_dict(),
+            "source_format": "latex",
+            "source_path": str(self.source_path),
+            "attempts": [
+                {
+                    "engine_name": attempt.engine_name,
+                    "engine_path": attempt.engine_path,
+                    "source_name": attempt.source_name,
+                    "success": attempt.success,
+                    "summary": attempt.summary,
+                }
+                for attempt in self.attempts
+            ],
+        }
 
 
 class _FirstTableParser(HTMLParser):
@@ -133,6 +269,19 @@ class PDFRenderer:
     _HTML_PAGE_MARGIN_RIGHT = "8mm"
     _HTML_PAGE_MARGIN_BOTTOM = "9mm"
     _HTML_PAGE_MARGIN_LEFT = "8mm"
+    _LATEX_ENGINE_SEARCH_ORDER = ("latexmk", "pdflatex", "tectonic")
+    _LATEX_ENGINE_ENV_VAR_MAP = {
+        "latexmk": ("SYNTHETIC_TABLES_LATEXMK", "LATEXMK_PATH"),
+        "pdflatex": ("SYNTHETIC_TABLES_PDFLATEX", "PDFLATEX_PATH"),
+        "tectonic": ("SYNTHETIC_TABLES_TECTONIC", "TECTONIC_PATH"),
+    }
+    _LATEX_ENGINE_SEARCH_LOCATIONS = (
+        "PATH",
+        "common Windows MiKTeX / TeX Live / TinyTeX install locations",
+    )
+    _WINDOWS_MIKTEX_HINT = (
+        "On Windows, install MiKTeX and make sure `latexmk.exe` or `pdflatex.exe` is available."
+    )
 
     def render(self, source_path: Path, output_path: Path, source_format: str) -> PDFRenderResult:
         """Convert a source document into a PDF file."""
@@ -341,48 +490,717 @@ class PDFRenderer:
         }
 
     def _latex_to_pdf(self, source_path: Path, output_path: Path) -> str:
-        """Render LaTeX to PDF when pdflatex is available, otherwise fallback."""
+        """Render LaTeX with an explicit creative-first, safe-preview-second strategy."""
 
-        pdflatex_path = shutil.which("pdflatex")
-        if pdflatex_path is None:
-            latex_source = source_path.read_text(encoding="utf-8")
-            parsed_document = self._parse_generated_latex_document(latex_source, source_path.stem)
-            if parsed_document.headers:
-                self._render_html_table_to_pdf(parsed_document, output_path)
-                return "reportlab-latex-fallback"
-            fallback_html = self._latex_fallback_html(latex_source, source_path.stem)
-            self._html_to_pdf(fallback_html, output_path)
-            return "xhtml2pdf-latex-fallback"
+        latex_source = source_path.read_text(encoding="utf-8")
+        parsed_document = self._parse_generated_latex_document(latex_source, source_path.stem)
+        available_engines = self._available_latex_engines()
+        if not available_engines:
+            raise self._build_missing_latex_engine_error(source_path)
+        attempts: list[LatexCompileOutcome] = []
+
+        for engine_name, engine_path in available_engines:
+            outcome = self._compile_latex_source_outcome(
+                engine_name=engine_name,
+                engine_path=engine_path,
+                latex_source=latex_source,
+                source_name=source_path.name,
+            )
+            if outcome.success and outcome.pdf_bytes is not None:
+                output_path.write_bytes(outcome.pdf_bytes)
+                return f"{engine_name}-latex-creative"
+            attempts.append(outcome)
+
+        if parsed_document.headers:
+            safe_preview_source = self._latex_compatibility_source(parsed_document)
+            safe_source_name = f"{source_path.stem}__safe_preview.tex"
+            for engine_name, engine_path in available_engines:
+                outcome = self._compile_latex_source_outcome(
+                    engine_name=engine_name,
+                    engine_path=engine_path,
+                    latex_source=safe_preview_source,
+                    source_name=safe_source_name,
+                )
+                if outcome.success and outcome.pdf_bytes is not None:
+                    output_path.write_bytes(outcome.pdf_bytes)
+                    return f"{engine_name}-latex-safe-preview"
+                attempts.append(outcome)
+
+        raise self._build_latex_compile_failure_error(source_path, tuple(attempts))
+
+    def latex_engine_report(self) -> dict[str, object]:
+        """Summarize how the renderer is looking for local TeX engines."""
+
+        available = [
+            {"engine": engine_name, "path": engine_path}
+            for engine_name, engine_path in self._available_latex_engines()
+        ]
+        return {
+            "preferred_order": list(self._LATEX_ENGINE_SEARCH_ORDER),
+            "searched_executables": list(self._LATEX_ENGINE_SEARCH_ORDER),
+            "available_engines": available,
+            "engine_env_vars": {
+                engine_name: list(env_vars)
+                for engine_name, env_vars in self._LATEX_ENGINE_ENV_VAR_MAP.items()
+            },
+            "search_locations": list(self._LATEX_ENGINE_SEARCH_LOCATIONS),
+            "guidance": (
+                "LaTeX rendering requires a real TeX engine. "
+                f"{self._WINDOWS_MIKTEX_HINT} "
+                "If your TeX install is not on PATH, set "
+                "SYNTHETIC_TABLES_LATEXMK / LATEXMK_PATH, "
+                "SYNTHETIC_TABLES_PDFLATEX / PDFLATEX_PATH, or "
+                "SYNTHETIC_TABLES_TECTONIC / TECTONIC_PATH."
+            ),
+        }
+
+    def create_latex_diagnostic_bundle(self, source_path: Path, output_dir: Path) -> LatexDiagnosticBundle:
+        """Render one LaTeX source through native and fallback paths for side-by-side comparison."""
+
+        latex_source = source_path.read_text(encoding="utf-8")
+        parsed_document = self._parse_generated_latex_document(latex_source, source_path.stem)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        source_copy_path = output_dir / source_path.name
+        source_copy_path.write_text(latex_source, encoding="utf-8")
+
+        attempts: list[dict[str, str | bool | None]] = []
+        available_engines = self._available_latex_engines()
+        native_pdf_path: Path | None = None
+        safe_preview_pdf_path: Path | None = None
+        preferred_renderer: str | None = None
+
+        for engine_name, engine_path in available_engines:
+            outcome = self._compile_latex_source_outcome(
+                engine_name=engine_name,
+                engine_path=engine_path,
+                latex_source=latex_source,
+                source_name=source_path.name,
+            )
+            log_path = self._write_latex_attempt_log(
+                output_dir=output_dir,
+                stem=source_path.stem,
+                variant_label="creative",
+                outcome=outcome,
+            )
+            attempt_record: dict[str, str | bool | None] = {
+                "variant": "creative",
+                "engine": engine_name,
+                "engine_path": engine_path,
+                "success": outcome.success,
+                "summary": outcome.summary,
+                "log_path": str(log_path) if log_path else None,
+                "pdf_path": None,
+            }
+            if outcome.success and outcome.pdf_bytes is not None and native_pdf_path is None:
+                native_pdf_path = output_dir / f"{source_path.stem}__creative__{engine_name}.pdf"
+                native_pdf_path.write_bytes(outcome.pdf_bytes)
+                preferred_renderer = f"{engine_name}-latex-creative"
+                attempt_record["pdf_path"] = str(native_pdf_path)
+                attempts.append(attempt_record)
+                break
+            attempts.append(attempt_record)
+
+        if native_pdf_path is None and parsed_document.headers:
+            safe_preview_source = self._latex_compatibility_source(parsed_document)
+            safe_source_name = f"{source_path.stem}__safe_preview.tex"
+            for engine_name, engine_path in available_engines:
+                outcome = self._compile_latex_source_outcome(
+                    engine_name=engine_name,
+                    engine_path=engine_path,
+                    latex_source=safe_preview_source,
+                    source_name=safe_source_name,
+                )
+                log_path = self._write_latex_attempt_log(
+                    output_dir=output_dir,
+                    stem=source_path.stem,
+                    variant_label="safe_preview",
+                    outcome=outcome,
+                )
+                attempt_record = {
+                    "variant": "safe_preview",
+                    "engine": engine_name,
+                    "engine_path": engine_path,
+                    "success": outcome.success,
+                    "summary": outcome.summary,
+                    "log_path": str(log_path) if log_path else None,
+                    "pdf_path": None,
+                }
+                if outcome.success and outcome.pdf_bytes is not None and safe_preview_pdf_path is None:
+                    safe_preview_pdf_path = output_dir / f"{source_path.stem}__safe_preview__{engine_name}.pdf"
+                    safe_preview_pdf_path.write_bytes(outcome.pdf_bytes)
+                    preferred_renderer = f"{engine_name}-latex-safe-preview"
+                    attempt_record["pdf_path"] = str(safe_preview_pdf_path)
+                    attempts.append(attempt_record)
+                    break
+                attempts.append(attempt_record)
+
+        fallback_pdf_path = output_dir / f"{source_path.stem}__fallback.pdf"
+        fallback_renderer = self._render_latex_without_tex_engine(
+            latex_source=latex_source,
+            parsed_document=parsed_document,
+            output_path=fallback_pdf_path,
+        )
+
+        report_path = output_dir / f"{source_path.stem}__diagnostics.json"
+        report_payload = {
+            "source_path": str(source_path),
+            "source_copy_path": str(source_copy_path),
+            "preferred_order": list(self._LATEX_ENGINE_SEARCH_ORDER),
+            "available_engines": [
+                {"engine": engine_name, "path": engine_path}
+                for engine_name, engine_path in available_engines
+            ],
+            "preferred_renderer": preferred_renderer,
+            "native_pdf_path": str(native_pdf_path) if native_pdf_path else None,
+            "safe_preview_pdf_path": str(safe_preview_pdf_path) if safe_preview_pdf_path else None,
+            "fallback_pdf_path": str(fallback_pdf_path),
+            "fallback_renderer": fallback_renderer,
+            "attempts": attempts,
+            "guidance": (
+                "Compare the creative PDF first. If it is missing or differs from TexViewer, inspect the "
+                "log summary for package errors, then compare the safe-preview and forced fallback PDFs."
+            ),
+        }
+        if not available_engines:
+            missing_engine_error = self._build_missing_latex_engine_error(source_path)
+            report_payload["missing_engine_summary"] = str(missing_engine_error)
+            report_payload["missing_engine_error"] = missing_engine_error.to_dict()
+        report_path.write_text(json.dumps(report_payload, indent=2), encoding="utf-8")
+
+        return LatexDiagnosticBundle(
+            source_path=source_path,
+            source_copy_path=source_copy_path,
+            report_path=report_path,
+            native_pdf_path=native_pdf_path,
+            safe_preview_pdf_path=safe_preview_pdf_path,
+            fallback_pdf_path=fallback_pdf_path,
+            preferred_renderer=preferred_renderer,
+            fallback_renderer=fallback_renderer,
+            attempts=tuple(attempts),
+        )
+
+    def _available_latex_engines(self) -> list[tuple[str, str]]:
+        """Return the supported local LaTeX engines in the order we prefer to use them."""
+
+        engines: list[tuple[str, str]] = []
+        seen_paths: set[str] = set()
+
+        def register(engine_name: str, candidate_path: str | Path | None) -> None:
+            if not candidate_path:
+                return
+            resolved = str(Path(candidate_path).expanduser())
+            if not Path(resolved).exists():
+                return
+            normalized = str(Path(resolved).resolve())
+            if normalized in seen_paths:
+                return
+            seen_paths.add(normalized)
+            engines.append((engine_name, normalized))
+
+        for engine_name, env_vars in self._LATEX_ENGINE_ENV_VAR_MAP.items():
+            for env_var in env_vars:
+                register(engine_name, os.environ.get(env_var))
+
+        for engine_name in self._LATEX_ENGINE_SEARCH_ORDER:
+            register(engine_name, shutil.which(engine_name))
+
+        home = Path.home()
+        program_files = Path(os.environ.get("ProgramFiles", "C:/Program Files"))
+        local_app_data = Path(os.environ.get("LOCALAPPDATA", home / "AppData/Local"))
+        roaming_app_data = Path(os.environ.get("APPDATA", home / "AppData/Roaming"))
+        common_candidates: dict[str, tuple[Path, ...]] = {
+            "latexmk": (
+                program_files / "MiKTeX/miktex/bin/x64/latexmk.exe",
+                local_app_data / "Programs/MiKTeX/miktex/bin/x64/latexmk.exe",
+                Path("C:/texlive/2024/bin/windows/latexmk.exe"),
+                Path("C:/texlive/2023/bin/windows/latexmk.exe"),
+                roaming_app_data / "TinyTeX/bin/windows/latexmk.exe",
+            ),
+            "pdflatex": (
+                program_files / "MiKTeX/miktex/bin/x64/pdflatex.exe",
+                local_app_data / "Programs/MiKTeX/miktex/bin/x64/pdflatex.exe",
+                Path("C:/texlive/2024/bin/windows/pdflatex.exe"),
+                Path("C:/texlive/2023/bin/windows/pdflatex.exe"),
+                roaming_app_data / "TinyTeX/bin/windows/pdflatex.exe",
+            ),
+            "tectonic": (
+                local_app_data / "Pandoc/tectonic.exe",
+                program_files / "Tectonic/tectonic.exe",
+            ),
+        }
+        for engine_name in self._LATEX_ENGINE_SEARCH_ORDER:
+            for candidate in common_candidates.get(engine_name, ()):
+                register(engine_name, candidate)
+
+        return engines
+
+    def _build_missing_latex_engine_error(self, source_path: Path) -> LatexEngineRequiredError:
+        """Create the structured error raised when no supported TeX engine is available."""
+
+        return LatexEngineRequiredError(
+            source_path=source_path,
+            searched_executables=self._LATEX_ENGINE_SEARCH_ORDER,
+            engine_env_vars=self._LATEX_ENGINE_ENV_VAR_MAP,
+            search_locations=self._LATEX_ENGINE_SEARCH_LOCATIONS,
+            windows_install_hint=self._WINDOWS_MIKTEX_HINT,
+        )
+
+    def _build_latex_compile_failure_error(
+        self,
+        source_path: Path,
+        attempts: tuple[LatexCompileOutcome, ...],
+    ) -> LatexCompilationFailedError:
+        """Create the structured error raised after all TeX-backed compile attempts fail."""
+
+        return LatexCompilationFailedError(
+            source_path=source_path,
+            attempts=attempts,
+        )
+
+    def _compile_latex_source(
+        self,
+        engine_name: str,
+        engine_path: str,
+        latex_source: str,
+        source_name: str,
+        output_path: Path,
+    ) -> bool:
+        """Compile one LaTeX source string with the requested engine."""
+
+        outcome = self._compile_latex_source_outcome(
+            engine_name=engine_name,
+            engine_path=engine_path,
+            latex_source=latex_source,
+            source_name=source_name,
+        )
+        if not outcome.success or outcome.pdf_bytes is None:
+            return False
+
+        output_path.write_bytes(outcome.pdf_bytes)
+        return True
+
+    def _compile_latex_source_outcome(
+        self,
+        engine_name: str,
+        engine_path: str,
+        latex_source: str,
+        source_name: str,
+    ) -> LatexCompileOutcome:
+        """Compile one LaTeX source and capture the emitted PDF bytes and log diagnostics."""
 
         try:
             with TemporaryDirectory() as temp_dir:
                 temp_dir_path = Path(temp_dir)
-                temp_source_path = temp_dir_path / source_path.name
-                temp_source_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
-                subprocess.run(
-                    [
-                        pdflatex_path,
-                        "-interaction=nonstopmode",
-                        "-halt-on-error",
-                        temp_source_path.name,
-                    ],
-                    cwd=temp_dir_path,
-                    check=True,
-                    capture_output=True,
-                    text=True,
+                temp_source_path = temp_dir_path / source_name
+                temp_source_path.write_text(latex_source, encoding="utf-8")
+                completed = self._run_latex_engine(engine_name, engine_path, temp_source_path, temp_dir_path)
+                log_text = self._collect_latex_log_text(
+                    workdir=temp_dir_path,
+                    source_stem=temp_source_path.stem,
+                    completed=completed,
                 )
                 compiled_pdf_path = temp_dir_path / f"{temp_source_path.stem}.pdf"
-                output_path.write_bytes(compiled_pdf_path.read_bytes())
-            return "pdflatex"
-        except (OSError, subprocess.CalledProcessError):
-            latex_source = source_path.read_text(encoding="utf-8")
-            parsed_document = self._parse_generated_latex_document(latex_source, source_path.stem)
-            if parsed_document.headers:
-                self._render_html_table_to_pdf(parsed_document, output_path)
-                return "reportlab-latex-fallback"
-            fallback_html = self._latex_fallback_html(latex_source, source_path.stem)
-            self._html_to_pdf(fallback_html, output_path)
-            return "xhtml2pdf-latex-fallback"
+                if completed.returncode != 0:
+                    return LatexCompileOutcome(
+                        engine_name=engine_name,
+                        engine_path=engine_path,
+                        source_name=source_name,
+                        success=False,
+                        pdf_bytes=None,
+                        log_text=log_text,
+                        summary=self._summarize_latex_failure(log_text, engine_name),
+                    )
+                if not compiled_pdf_path.exists():
+                    return LatexCompileOutcome(
+                        engine_name=engine_name,
+                        engine_path=engine_path,
+                        source_name=source_name,
+                        success=False,
+                        pdf_bytes=None,
+                        log_text=log_text,
+                        summary="The TeX engine exited without producing a PDF artifact.",
+                    )
+                return LatexCompileOutcome(
+                    engine_name=engine_name,
+                    engine_path=engine_path,
+                    source_name=source_name,
+                    success=True,
+                    pdf_bytes=compiled_pdf_path.read_bytes(),
+                    log_text=log_text,
+                    summary="Compilation succeeded.",
+                )
+        except OSError as exc:
+            return LatexCompileOutcome(
+                engine_name=engine_name,
+                engine_path=engine_path,
+                source_name=source_name,
+                success=False,
+                pdf_bytes=None,
+                log_text=str(exc),
+                summary=f"Failed to launch the TeX engine: {exc}",
+            )
+
+    def _run_latex_engine(
+        self,
+        engine_name: str,
+        engine_path: str,
+        source_path: Path,
+        workdir: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        """Invoke one LaTeX engine using conservative flags."""
+
+        if engine_name == "latexmk":
+            command = [
+                engine_path,
+                "-pdf",
+                "-interaction=nonstopmode",
+                "-halt-on-error",
+                "-file-line-error",
+                source_path.name,
+            ]
+        elif engine_name == "pdflatex":
+            command = [
+                engine_path,
+                "-interaction=nonstopmode",
+                "-halt-on-error",
+                "-file-line-error",
+                source_path.name,
+            ]
+        elif engine_name == "tectonic":
+            command = [
+                engine_path,
+                "--keep-logs",
+                "--outdir",
+                str(workdir),
+                source_path.name,
+            ]
+        else:
+            raise ValueError(f"Unsupported LaTeX engine: {engine_name}")
+
+        return subprocess.run(
+            command,
+            cwd=workdir,
+            capture_output=True,
+            text=True,
+        )
+
+    def _collect_latex_log_text(
+        self,
+        workdir: Path,
+        source_stem: str,
+        completed: subprocess.CompletedProcess[str] | None,
+    ) -> str:
+        """Merge the TeX log file and captured process streams into one diagnostic string."""
+
+        parts: list[str] = []
+        log_path = workdir / f"{source_stem}.log"
+        if log_path.exists():
+            parts.append(log_path.read_text(encoding="utf-8", errors="replace"))
+        if completed and completed.stdout:
+            parts.append("\n[stdout]\n" + completed.stdout)
+        if completed and completed.stderr:
+            parts.append("\n[stderr]\n" + completed.stderr)
+        return "\n".join(part for part in parts if part).strip()
+
+    def _summarize_latex_failure(self, log_text: str, engine_name: str) -> str:
+        """Produce a short actionable summary for a failed LaTeX compile."""
+
+        package_match = re.search(r"LaTeX Error: File `([^`]+)' not found\.", log_text)
+        if package_match:
+            missing_file = package_match.group(1)
+            return (
+                f"{engine_name} could not find `{missing_file}`. This usually means the TeX distribution "
+                "is missing a required package or input file."
+            )
+
+        package_error_match = re.search(r"! Package ([^\s]+) Error: ([^\n]+)", log_text)
+        if package_error_match:
+            return f"{package_error_match.group(1)} reported: {package_error_match.group(2).strip()}"
+
+        if "! Undefined control sequence." in log_text:
+            return (
+                f"{engine_name} hit an undefined control sequence. This usually points to a missing package "
+                "or a compiler mismatch."
+            )
+
+        if "Fatal error occurred, no output PDF file produced" in log_text:
+            return f"{engine_name} aborted with a fatal LaTeX error before producing a PDF."
+
+        if "Emergency stop" in log_text:
+            return f"{engine_name} reached an emergency stop after a fatal TeX error."
+
+        if not log_text:
+            return f"{engine_name} failed without emitting a TeX log."
+
+        last_lines = [line.strip() for line in log_text.splitlines() if line.strip()]
+        excerpt = " ".join(last_lines[-2:])[:240]
+        return f"{engine_name} failed. Last log lines: {excerpt}"
+
+    def _write_latex_attempt_log(
+        self,
+        output_dir: Path,
+        stem: str,
+        variant_label: str,
+        outcome: LatexCompileOutcome,
+    ) -> Path | None:
+        """Persist one compilation log so diagnostics survive outside the temp directory."""
+
+        if not outcome.log_text:
+            return None
+        log_path = output_dir / f"{stem}__{variant_label}__{outcome.engine_name}.log"
+        log_path.write_text(outcome.log_text, encoding="utf-8", errors="replace")
+        return log_path
+
+    def _render_latex_without_tex_engine(
+        self,
+        latex_source: str,
+        parsed_document: ParsedTableDocument,
+        output_path: Path,
+    ) -> str:
+        """Force the non-TeX fallback path for side-by-side diagnostics."""
+
+        if parsed_document.headers:
+            self._render_html_table_to_pdf(parsed_document, output_path)
+            return "reportlab-latex-safe-preview"
+
+        fallback_html = self._latex_fallback_html(latex_source, parsed_document.title or output_path.stem)
+        self._html_to_pdf(fallback_html, output_path)
+        return "xhtml2pdf-latex-source-preview"
+
+    def _latex_compatibility_source(self, document: ParsedTableDocument) -> str:
+        """Build a conservative standalone LaTeX preview from the parsed canonical table."""
+
+        if not document.headers:
+            escaped_title = self._escape_latex_source(document.title)
+            return (
+                "\\documentclass[10pt]{article}\n"
+                "\\usepackage[margin=0.75in]{geometry}\n"
+                "\\usepackage[T1]{fontenc}\n"
+                "\\usepackage[utf8]{inputenc}\n"
+                "\\usepackage{lmodern}\n"
+                "\\begin{document}\n"
+                f"% LATEX_RENDER_MODE: safe-preview\n% PDF_TITLE: {escaped_title}\n\n"
+                f"\\noindent{{\\Large\\bfseries {escaped_title}}}\\\\[8pt]\n"
+                "No structured table content was available for compatibility preview.\n"
+                "\\end{document}\n"
+            )
+
+        title_escaped = self._escape_latex_source(document.title)
+        detail_sections = self._document_detail_sections(document)
+        preview_headers, preview_rows = self._document_preview(document)
+        column_kinds = [self._infer_column_kind(document.headers, document.rows, index) for index in range(len(document.headers))]
+        long_text_columns = sum(kind == "long_text" for kind in column_kinds)
+        orientation = "landscape" if len(detail_sections) == 1 and (len(document.headers) >= 8 or long_text_columns >= 3) else "portrait"
+
+        preview_column_spec = " ".join(
+            [
+                r">{\raggedright\arraybackslash}p{0.18\linewidth}",
+                *[r">{\raggedright\arraybackslash}X" for _ in preview_headers[1:]],
+            ]
+        )
+        preview_header_cells = " & ".join(self._escape_latex_source(header) for header in preview_headers)
+        preview_row_lines = [
+            " & ".join(self._escape_latex_source(cell) for cell in row) + r" \\"
+            for row in preview_rows
+        ]
+
+        section_blocks: list[str] = []
+        for section in detail_sections:
+            section_headers = section["headers"]
+            section_rows = section["rows"]
+            section_column_kinds = [
+                self._infer_column_kind(section_headers, section_rows, index)
+                for index in range(len(section_headers))
+            ]
+            section_widths = self._calculate_column_widths(section_headers, section_rows, section_column_kinds)
+            normalized_widths = [width / 100.0 * 0.97 for width in section_widths]
+            section_column_spec = " ".join(
+                self._latex_preview_alignment_token(kind, width_fraction)
+                for kind, width_fraction in zip(section_column_kinds, normalized_widths)
+            )
+            section_header_cells = " & ".join(self._escape_latex_source(header) for header in section_headers)
+            section_row_lines = [
+                " & ".join(self._escape_latex_source(cell) for cell in row) + r" \\"
+                for row in section_rows
+            ]
+            section_font = (
+                "\\scriptsize"
+                if len(section_headers) >= 6
+                else "\\footnotesize"
+                if len(section_headers) >= 5
+                else "\\small"
+            )
+            section_blocks.append(
+                f"\\subsection*{{{self._escape_latex_source(str(section['title']))}}}\n"
+                f"\\noindent\\textit{{{self._escape_latex_source(str(section['subtitle']))}}}\n\n"
+                f"{section_font}\n"
+                "\\rowcolors{2}{CompatHeader!10}{white}\n"
+                f"\\begin{{longtable}}{{ {section_column_spec} }}\n"
+                "\\toprule\n"
+                f"{section_header_cells} \\\\\n"
+                "\\midrule\n"
+                "\\endfirsthead\n"
+                "\\toprule\n"
+                f"{section_header_cells} \\\\\n"
+                "\\midrule\n"
+                "\\endhead\n"
+                f"{chr(10).join(section_row_lines)}\n"
+                "\\bottomrule\n"
+                "\\end{longtable}\n"
+                "\\normalsize\n"
+            )
+
+        return (
+            "\\documentclass[10pt]{article}\n"
+            f"\\usepackage[{orientation}, margin=0.55in]{{geometry}}\n"
+            "\\usepackage[T1]{fontenc}\n"
+            "\\usepackage[utf8]{inputenc}\n"
+            "\\usepackage{lmodern}\n"
+            "\\usepackage[table]{xcolor}\n"
+            "\\usepackage{array}\n"
+            "\\usepackage{booktabs}\n"
+            "\\usepackage{longtable}\n"
+            "\\usepackage{tabularx}\n"
+            "\\definecolor{CompatAccent}{RGB}{44,82,130}\n"
+            "\\definecolor{CompatHeader}{RGB}{220,235,250}\n"
+            "\\definecolor{CompatBorder}{RGB}{92,107,122}\n"
+            "\\renewcommand{\\arraystretch}{1.14}\n"
+            "\\setlength{\\tabcolsep}{4pt}\n"
+            "\\begin{document}\n"
+            "\\pagestyle{empty}\n"
+            f"% LATEX_RENDER_MODE: safe-preview\n% PDF_TITLE: {title_escaped}\n\n"
+            f"\\noindent{{\\Large\\bfseries {title_escaped}}}\\\\[4pt]\n"
+            "{\\small Compatibility preview generated from the canonical table block. This mode avoids advanced chart packages but preserves the overview-plus-details structure.}\\\\[8pt]\n"
+            "\\noindent\n"
+            "\\begin{minipage}[t]{0.48\\linewidth}\n"
+            f"\\fcolorbox{{CompatBorder!60}}{{CompatHeader!18}}{{\\parbox{{\\dimexpr\\linewidth-2\\fboxsep-2\\fboxrule\\relax}}{{\\small\\textbf{{Rows:}} {len(document.rows)}\\\\[3pt]\\textbf{{Columns:}} {len(document.headers)}\\\\[3pt]\\textbf{{Detail Sections:}} {len(detail_sections)}\\\\[3pt]Page 1 stays compact before the detailed row tables begin.}}}}\n"
+            "\\end{minipage}\\hfill\n"
+            "\\begin{minipage}[t]{0.48\\linewidth}\n"
+            "\\fcolorbox{CompatBorder!60}{white}{\\parbox{\\dimexpr\\linewidth-2\\fboxsep-2\\fboxrule\\relax}{\\small\\textbf{Chart note}\\\\[3pt]Compatibility mode omits pgfplots so stricter environments still compile a faithful structured preview.}}\n"
+            "\\end{minipage}\n\n"
+            "\\vspace{8pt}\n"
+            "\\noindent\\textbf{Traceable Preview}\\\\[3pt]\n"
+            "{\\small First rows across the leading fields. The Record anchor matches the later detail tables.}\\\\[4pt]\n"
+            "\\footnotesize\n"
+            f"\\begin{{tabularx}}{{\\linewidth}}{{ {preview_column_spec} }}\n"
+            "\\toprule\n"
+            f"{preview_header_cells} \\\\\n"
+            "\\midrule\n"
+            f"{chr(10).join(preview_row_lines)}\n"
+            "\\bottomrule\n"
+            "\\end{tabularx}\n"
+            "\\normalsize\n"
+            "\\clearpage\n"
+            "\\section*{Detailed Tables}\n"
+            "\\noindent\\textit{Detailed content is moved to later pages and split into smaller sections when the schema is wide.}\n\n"
+            f"{''.join(section_blocks)}"
+            "\\end{document}\n"
+        )
+
+    def _document_preview(self, document: ParsedTableDocument) -> tuple[list[str], list[list[str]]]:
+        """Return a small deterministic preview slice for the first page."""
+
+        if not document.headers:
+            return [], []
+
+        data_column_limit = min(max(1, len(document.headers) - 1), 4 if len(document.headers) <= 5 else 3)
+        preview_limit = 1 + data_column_limit
+        return (
+            document.headers[:preview_limit],
+            [row[:preview_limit] for row in document.rows[: min(4, len(document.rows))]],
+        )
+
+    def _document_detail_sections(self, document: ParsedTableDocument) -> list[dict[str, object]]:
+        """Split wide parsed tables into smaller readable detail sections."""
+
+        if not document.headers:
+            return []
+
+        if len(document.headers) <= 1:
+            return [
+                {
+                    "title": "Full Index",
+                    "subtitle": "Only one column was available.",
+                    "headers": document.headers,
+                    "rows": document.rows,
+                }
+            ]
+
+        data_column_limit = self._document_detail_column_limit(document)
+        data_column_count = len(document.headers) - 1
+        if data_column_count <= data_column_limit:
+            ranges = [(1, len(document.headers))]
+        else:
+            ranges = [
+                (start, min(len(document.headers), start + data_column_limit))
+                for start in range(1, len(document.headers), data_column_limit)
+            ]
+
+        sections: list[dict[str, object]] = []
+        for section_index, (start, end) in enumerate(ranges, start=1):
+            headers = [document.headers[0], *document.headers[start:end]]
+            rows = [[row[0], *row[start:end]] for row in document.rows]
+            if len(ranges) == 1:
+                title = "Full Index"
+                subtitle = "All columns remain together because the table still fits as one readable section."
+            else:
+                title = f"Detail Section {section_index}"
+                subtitle = (
+                    f"Columns from {document.headers[start]} through {document.headers[end - 1]}. "
+                    "The Record anchor repeats in every section."
+                )
+            sections.append({"title": title, "subtitle": subtitle, "headers": headers, "rows": rows})
+        return sections
+
+    def _document_detail_column_limit(self, document: ParsedTableDocument) -> int:
+        """Choose how many data columns belong in one readable detail section."""
+
+        if len(document.headers) <= 1:
+            return 1
+
+        data_column_count = len(document.headers) - 1
+        long_text_columns = sum(
+            self._infer_column_kind(document.headers, document.rows, index) == "long_text"
+            for index in range(1, len(document.headers))
+        )
+        if data_column_count >= 10 or long_text_columns >= 3:
+            return 3
+        if data_column_count >= 5:
+            return 4
+        return max(1, data_column_count)
+
+    @staticmethod
+    def _latex_preview_alignment_token(column_kind: str, width_fraction: float) -> str:
+        """Return a conservative LaTeX preview alignment token."""
+
+        width = f"{width_fraction:.3f}\\linewidth"
+        if column_kind == "numeric":
+            return rf">{{\raggedleft\arraybackslash}}p{{{width}}}"
+        if column_kind in {"date", "code"}:
+            return rf">{{\centering\arraybackslash}}p{{{width}}}"
+        return rf">{{\raggedright\arraybackslash}}p{{{width}}}"
+
+    @staticmethod
+    def _escape_latex_source(value: str) -> str:
+        """Escape plain text for compatibility-preview LaTeX output."""
+
+        replacements = {
+            "\\": r"\textbackslash{}",
+            "&": r"\&",
+            "%": r"\%",
+            "$": r"\$",
+            "#": r"\#",
+            "_": r"\_",
+            "{": r"\{",
+            "}": r"\}",
+            "~": r"\textasciitilde{}",
+            "^": r"\textasciicircum{}",
+        }
+        escaped = value
+        for original, replacement in replacements.items():
+            escaped = escaped.replace(original, replacement)
+        return escaped
 
     def _markdown_to_html_document(self, markdown_text: str, title: str) -> str:
         """Convert Markdown text into a standalone HTML document for browser-grade PDF rendering."""
@@ -1037,18 +1855,36 @@ class PDFRenderer:
     def _parse_generated_latex_document(self, latex_source: str, fallback_title: str) -> ParsedTableDocument:
         """Extract the generated longtable data from the controlled LaTeX template."""
 
-        title_match = re.search(r"\\noindent\{\\Large\s+(.*?)\}\\\\\[8pt\]", latex_source, flags=re.DOTALL)
-        title = self._unescape_latex(title_match.group(1).strip()) if title_match else fallback_title
+        title = fallback_title
+        comment_title_match = re.search(r"^\s*%\s*PDF_TITLE:\s*(.+?)\s*$", latex_source, flags=re.MULTILINE)
+        if comment_title_match is not None:
+            title = self._unescape_latex(comment_title_match.group(1).strip())
+        else:
+            title_match = re.search(r"\\noindent\{\\Large\s+(.*?)\}\\\\\[8pt\]", latex_source, flags=re.DOTALL)
+            if title_match is not None:
+                title = self._unescape_latex(title_match.group(1).strip())
 
         table_match = re.search(
-            r"\\begin\{longtable\}\{.*?\}(.*?)\\end\{longtable\}",
+            r"%\s*PDF_FALLBACK_TABLE_BEGIN(.*?)%\s*PDF_FALLBACK_TABLE_END",
             latex_source,
             flags=re.DOTALL,
         )
         if table_match is None:
+            table_match = re.search(
+                r"\\begin\{longtable\}\{.*?\}(.*?)\\end\{longtable\}",
+                latex_source,
+                flags=re.DOTALL,
+            )
+        if table_match is None:
             return ParsedTableDocument(title=title, headers=[], rows=[])
 
-        table_content = table_match.group(1)
+        table_block = re.sub(r"(?m)^\s*%\s?", "", table_match.group(1))
+        longtable_match = re.search(
+            r"\\begin\{longtable\}\{.*?\}(.*?)\\end\{longtable\}",
+            table_block,
+            flags=re.DOTALL,
+        )
+        table_content = longtable_match.group(1) if longtable_match is not None else table_block
         first_head_part, _, remainder = table_content.partition(r"\endfirsthead")
         _, has_endhead, body_part = remainder.partition(r"\endhead")
         if not has_endhead:
@@ -1166,10 +2002,11 @@ class PDFRenderer:
 
         column_count = len(document.headers)
         column_kinds = [self._infer_column_kind(document.headers, document.rows, index) for index in range(column_count)]
-        column_width_ratios = self._calculate_column_widths(document.headers, document.rows, column_kinds)
         long_text_columns = sum(kind == "long_text" for kind in column_kinds)
+        detail_sections = self._document_detail_sections(document)
+        preview_headers, preview_rows = self._document_preview(document)
 
-        page_size = landscape(A4) if column_count >= 7 or long_text_columns >= 3 else A4
+        page_size = landscape(A4) if len(detail_sections) == 1 and (column_count >= 7 or long_text_columns >= 3) else A4
         if page_size == landscape(A4):
             left_margin = 6 * mm
             right_margin = 6 * mm
@@ -1183,12 +2020,7 @@ class PDFRenderer:
 
         page_width, _ = page_size
         usable_width = page_width - left_margin - right_margin
-        column_widths = [usable_width * (ratio / 100.0) for ratio in column_width_ratios]
-
-        body_font_size = 6.7 if column_count >= 10 else 7.2 if column_count >= 8 else 8 if column_count >= 6 else 9
-        header_font_size = body_font_size + 0.5
-        title_font_size = body_font_size + 5
-        leading = body_font_size + 2
+        title_font_size = 13 if page_size == landscape(A4) else 14
 
         styles = getSampleStyleSheet()
         title_style = ParagraphStyle(
@@ -1200,69 +2032,93 @@ class PDFRenderer:
             textColor=colors.HexColor("#2c5282"),
             spaceAfter=8,
         )
-        header_styles = [
-            ParagraphStyle(
-                f"HeaderCol{index}",
-                parent=styles["BodyText"],
-                fontName="Helvetica-Bold",
-                fontSize=header_font_size,
-                leading=header_font_size + 2,
-                textColor=colors.HexColor("#1f2933"),
-                alignment=self._reportlab_alignment(self._alignment_for_kind(column_kinds[index])),
-                wordWrap="LTR",
-            )
-            for index in range(column_count)
-        ]
-        body_styles = [
-            ParagraphStyle(
-                f"BodyCol{index}",
-                parent=styles["BodyText"],
-                fontName="Helvetica",
-                fontSize=body_font_size,
-                leading=leading,
-                textColor=colors.HexColor("#1f2933"),
-                alignment=self._reportlab_alignment(self._alignment_for_kind(column_kinds[index])),
-                wordWrap="LTR",
-            )
-            for index in range(column_count)
-        ]
+        body_text_style = ParagraphStyle(
+            "HTMLDebugBody",
+            parent=styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=9,
+            leading=11,
+            textColor=colors.HexColor("#1f2933"),
+            spaceAfter=6,
+        )
+        section_title_style = ParagraphStyle(
+            "HTMLDebugSectionTitle",
+            parent=styles["Heading2"],
+            fontName="Helvetica-Bold",
+            fontSize=12,
+            leading=14,
+            textColor=colors.HexColor("#1f2933"),
+            spaceAfter=6,
+            spaceBefore=6,
+        )
 
         def paragraph(text: str, style: ParagraphStyle) -> Paragraph:
             normalized = escape(text or "")
             return Paragraph(normalized if normalized else "&nbsp;", style)
 
-        table_data: list[list[Paragraph]] = [
-            [paragraph(header, header_styles[index]) for index, header in enumerate(document.headers)]
-        ]
-        for row in document.rows:
-            table_data.append([paragraph(cell, body_styles[index]) for index, cell in enumerate(row)])
-
-        table = LongTable(
-            table_data,
-            colWidths=column_widths,
-            repeatRows=1,
-            splitByRow=1,
-            hAlign="LEFT",
-        )
-
-        style_commands: list[tuple] = [
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dcebfa")),
-            ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#1f2933")),
-            ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#64748b")),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 3),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ]
-
-        for row_index in range(1, len(table_data)):
-            if row_index % 2 == 0:
-                style_commands.append(
-                    ("BACKGROUND", (0, row_index), (-1, row_index), colors.HexColor("#f8fafc"))
+        def build_table(headers: list[str], rows: list[list[str]]) -> LongTable:
+            local_column_count = len(headers)
+            local_kinds = [self._infer_column_kind(headers, rows, index) for index in range(local_column_count)]
+            local_width_ratios = self._calculate_column_widths(headers, rows, local_kinds)
+            local_widths = [usable_width * (ratio / 100.0) for ratio in local_width_ratios]
+            local_body_font_size = 6.8 if local_column_count >= 7 else 7.5 if local_column_count >= 5 else 8.4
+            local_header_font_size = local_body_font_size + 0.5
+            local_leading = local_body_font_size + 2
+            local_header_styles = [
+                ParagraphStyle(
+                    f"HeaderCol{local_column_count}_{index}",
+                    parent=styles["BodyText"],
+                    fontName="Helvetica-Bold",
+                    fontSize=local_header_font_size,
+                    leading=local_header_font_size + 2,
+                    textColor=colors.HexColor("#1f2933"),
+                    alignment=self._reportlab_alignment(self._alignment_for_kind(local_kinds[index])),
+                    wordWrap="LTR",
                 )
+                for index in range(local_column_count)
+            ]
+            local_body_styles = [
+                ParagraphStyle(
+                    f"BodyCol{local_column_count}_{index}",
+                    parent=styles["BodyText"],
+                    fontName="Helvetica",
+                    fontSize=local_body_font_size,
+                    leading=local_leading,
+                    textColor=colors.HexColor("#1f2933"),
+                    alignment=self._reportlab_alignment(self._alignment_for_kind(local_kinds[index])),
+                    wordWrap="LTR",
+                )
+                for index in range(local_column_count)
+            ]
 
-        table.setStyle(TableStyle(style_commands))
+            table_data: list[list[Paragraph]] = [
+                [paragraph(header, local_header_styles[index]) for index, header in enumerate(headers)]
+            ]
+            for row in rows:
+                table_data.append([paragraph(cell, local_body_styles[index]) for index, cell in enumerate(row)])
+
+            table = LongTable(
+                table_data,
+                colWidths=local_widths,
+                repeatRows=1,
+                splitByRow=1,
+                hAlign="LEFT",
+            )
+            style_commands: list[tuple] = [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dcebfa")),
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#1f2933")),
+                ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#64748b")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+            for row_index in range(1, len(table_data)):
+                if row_index % 2 == 0:
+                    style_commands.append(("BACKGROUND", (0, row_index), (-1, row_index), colors.HexColor("#f8fafc")))
+            table.setStyle(TableStyle(style_commands))
+            return table
 
         document_template = SimpleDocTemplate(
             str(output_path),
@@ -1275,9 +2131,33 @@ class PDFRenderer:
         )
         story = [
             Paragraph(escape(document.title), title_style),
-            Spacer(1, 2),
-            table,
+            Paragraph(
+                "Compatibility preview generated from the canonical table block. The overview stays compact and detailed rows begin on later pages.",
+                body_text_style,
+            ),
+            Paragraph(
+                f"<b>Rows:</b> {len(document.rows)}&nbsp;&nbsp;&nbsp;<b>Columns:</b> {len(document.headers)}"
+                f"&nbsp;&nbsp;&nbsp;<b>Detail Sections:</b> {len(detail_sections)}",
+                body_text_style,
+            ),
+            Paragraph(
+                "<b>Chart note:</b> Non-LaTeX fallback omits the chart but preserves the same summary-plus-details structure.",
+                body_text_style,
+            ),
+            Paragraph("Traceable Preview", section_title_style),
+            build_table(preview_headers, preview_rows),
+            PageBreak(),
+            Paragraph("Detailed Tables", title_style),
         ]
+        for section in detail_sections:
+            story.extend(
+                [
+                    Paragraph(escape(str(section["title"])), section_title_style),
+                    Paragraph(escape(str(section["subtitle"])), body_text_style),
+                    build_table(section["headers"], section["rows"]),
+                    Spacer(1, 6),
+                ]
+            )
         document_template.build(story)
 
     def _infer_column_kind(self, headers: list[str], rows: list[list[str]], column_index: int) -> str:

@@ -1,0 +1,14 @@
+{% include "_shared_preamble.tex.j2" %}
+\begin{heroBox}[colback=white]
+{\Large\bfseries {{ table.display_name_escaped }}}\\[4pt]
+\textsc{ {{ latex.layout_label_escaped }} }\\[6pt]
+\small This memo keeps page 1 concise with a summary, one directly-derived chart, and a compact traceable preview before the detailed tables begin.
+\end{heroBox}
+
+\vspace{8pt}
+{% include "_shared_overview.tex.j2" %}
+\vspace{8pt}
+{% include "_shared_preview_table.tex.j2" %}
+\vspace{8pt}
+{% include "_shared_full_index.tex.j2" %}
+\end{document}

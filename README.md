@@ -99,7 +99,16 @@ synthetic_tables\.venv\Scripts\python.exe -m pip install -r synthetic_tables/req
 synthetic_tables\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-4. Optional: verify the `venv` is the one being used:
+4. If you plan to render LaTeX PDFs, install a real TeX engine. On Windows, MiKTeX is the recommended setup. Make sure `latexmk.exe` or `pdflatex.exe` is available on `PATH`, or point the project at the executable explicitly with:
+
+- `SYNTHETIC_TABLES_LATEXMK`
+- `LATEXMK_PATH`
+- `SYNTHETIC_TABLES_PDFLATEX`
+- `PDFLATEX_PATH`
+- `SYNTHETIC_TABLES_TECTONIC`
+- `TECTONIC_PATH`
+
+5. Optional: verify the `venv` is the one being used:
 
 ```bash
 synthetic_tables\.venv\Scripts\python.exe -m pip list
@@ -112,6 +121,31 @@ Run the complete pipeline with defaults:
 ```bash
 synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py
 ```
+
+Run the focused LaTeX smoke test against one representative generated sample:
+
+```bash
+synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/latex_smoke_test.py
+```
+
+If TexViewer is using a TeX install that is not on `PATH`, point the smoke test at that exact executable:
+
+```bash
+$env:SYNTHETIC_TABLES_LATEXMK = "C:\Path\To\latexmk.exe"
+synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/latex_smoke_test.py ^
+  --source synthetic_tables/data/rendered/latex/base_table_003__v02.tex
+```
+
+The smoke test writes a diagnostic bundle under `data/rendered/diagnostics/<sample_stem>/` containing:
+
+- a copy of the generated `.tex`
+- the native TeX-compiled PDF if available
+- a safe-preview PDF if the creative source fails but the engine still compiles the compatibility source
+- the forced fallback PDF used only for diagnostics-side comparison
+- TeX log files for each attempt
+- a JSON report summarizing engine discovery and likely failure causes
+
+The forced fallback PDF is diagnostic-only. The normal LaTeX rendering path now requires a real TeX engine and does not use non-TeX PDF fallback rendering.
 
 The default run generates:
 
@@ -176,6 +210,39 @@ synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py --dpis 10
 synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py --source-formats html markdown
 ```
 
+## LaTeX Prerequisites
+
+LaTeX PDF rendering requires a real TeX engine. The renderer searches in this order:
+
+1. `latexmk -pdf`
+2. `pdflatex`
+3. `tectonic`
+
+If those executables are not available on `PATH`, the PDF renderer also looks at:
+
+- `SYNTHETIC_TABLES_LATEXMK`
+- `LATEXMK_PATH`
+- `SYNTHETIC_TABLES_PDFLATEX`
+- `PDFLATEX_PATH`
+- `SYNTHETIC_TABLES_TECTONIC`
+- `TECTONIC_PATH`
+
+On Windows, installing MiKTeX is the most practical option. After installation, ensure `latexmk.exe` or `pdflatex.exe` is reachable on `PATH`, or set one of the environment variables above to the full executable path.
+
+This is intentional behavior: if no supported TeX engine is found, LaTeX rendering fails immediately with a clear dependency error. It does not fall back to `reportlab`, `xhtml2pdf`, or any other non-TeX PDF renderer for the normal LaTeX pipeline.
+
+If a TeX engine is present but both the creative compile and the TeX-backed safe-preview compile fail, the LaTeX render still fails instead of switching to a non-TeX renderer.
+
+### Troubleshooting: No TeX Engine Found
+
+If you request LaTeX rendering without `latexmk`, `pdflatex`, or `tectonic`, the run fails with an explicit `latex_engine_required` error. The message tells you that a real TeX engine is required, lists the executables that were searched, and reminds you about the supported environment variables for explicit paths.
+
+For Windows users, the quickest fix is usually:
+
+1. Install MiKTeX.
+2. Confirm that `latexmk.exe` or `pdflatex.exe` is available.
+3. If it is not on `PATH`, set `SYNTHETIC_TABLES_LATEXMK` or `SYNTHETIC_TABLES_PDFLATEX` to the full executable path before running the pipeline.
+
 ### Full example
 
 ```bash
@@ -225,9 +292,9 @@ synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py ^
 - HTML emergency fallback -> PDF via `xhtml2pdf`
 - Markdown -> HTML -> PDF via `markdown` + internal `reportlab` table rendering
 - PDF -> image via `pypdfium2`
-- LaTeX -> PDF via `pdflatex` when available
-- LaTeX fallback -> PDF preview via `reportlab` when table extraction succeeds
-- LaTeX emergency fallback -> PDF preview via `xhtml2pdf` when `pdflatex` is unavailable or fails
+- LaTeX creative mode -> PDF via local LaTeX engines with `latexmk -pdf` preferred, then `pdflatex`, then `tectonic`
+- LaTeX safe-preview compatibility mode -> conservative standalone LaTeX compiled by the same TeX engine after a creative compile failure when the canonical table can be extracted
+- LaTeX diagnostic fallback preview -> PDF via `reportlab` or `xhtml2pdf` only inside `latex_smoke_test.py` comparison bundles, not in the normal LaTeX render path
 
 ## Requirements Notes
 
@@ -238,8 +305,8 @@ synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py ^
 - `markdown` for Markdown-to-HTML conversion
 - `playwright` for the default high-fidelity HTML-to-PDF path
 - `weasyprint` for the higher-fidelity HTML fallback path
-- `reportlab` for Markdown PDF rendering and structured fallback PDFs
-- `xhtml2pdf` for emergency HTML/LaTeX fallback rendering
+- `reportlab` for Markdown PDF rendering and LaTeX diagnostic fallback PDFs
+- `xhtml2pdf` for emergency HTML fallback rendering and LaTeX diagnostic source-preview PDFs
 - `pypdfium2` for PDF rasterization
 - `Pillow` for image output support
 
@@ -247,14 +314,20 @@ Browser/runtime notes:
 
 - Playwright needs a browser install step such as `python -m playwright install chromium`
 - WeasyPrint may also require native text/layout libraries on some systems; if those are missing, the renderer falls through to the next supported fallback
-- `xhtml2pdf` is intentionally still installed because the code keeps it as the final fallback, so it was not removed from the supported stack
+- `xhtml2pdf` is intentionally still installed because the HTML renderer keeps it as the emergency fallback, and the LaTeX smoke-test diagnostics can still emit a forced source-preview PDF with it
+- LaTeX PDF rendering depends on an external TeX engine being available; the pipeline looks for `latexmk`, `pdflatex`, or `tectonic` on `PATH`, through env vars like `SYNTHETIC_TABLES_LATEXMK` / `LATEXMK_PATH`, `SYNTHETIC_TABLES_PDFLATEX` / `PDFLATEX_PATH`, and `SYNTHETIC_TABLES_TECTONIC` / `TECTONIC_PATH`, plus common MiKTeX / TeX Live / TinyTeX locations on Windows
+- The LaTeX backend now has two intentional modes:
+  - creative templates for richer layouts and charts
+  - `default_table.tex.j2` as the conservative compatibility/debug layout
+- During PDF rendering, the LaTeX branch tries a creative compile first and then a safe-preview compile before failing the LaTeX render
 
 ## Limitations
 
 Current limitations of the project:
 
 - the pipeline generates synthetic tables, but not OCR annotations yet
-- LaTeX PDF generation depends on `pdflatex`; without it, the pipeline uses a fallback preview renderer
+- LaTeX creative mode still depends on the local engine supporting packages like `pgfplots` and `tcolorbox`; stricter installations may fall back to the safe-preview mode
+- If no local LaTeX engine is installed, LaTeX rendering now fails intentionally with a clear dependency error instead of using a non-TeX PDF fallback
 - HTML keeps its approved layout on the default Playwright path, but fallback renderers may still simplify layout if browser-grade rendering is unavailable
 - page layouts are still table-centric, with one table per rendered document
 - visual noise and document degradation are not yet modeled

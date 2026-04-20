@@ -1,0 +1,14 @@
+{% include "_shared_preamble.tex.j2" %}
+\begin{heroBox}[colback=PaperTint!92!white]
+{\Large\bfseries {{ table.display_name_escaped }}}\\[5pt]
+\textsc{ {{ latex.layout_label_escaped }} }\\[6pt]
+\small This layout is reserved for wide datasets. The overview stays compact on page 1, and the detailed rows are split into smaller later-page sections that repeat the same Record anchor.
+\end{heroBox}
+
+\vspace{8pt}
+{% include "_shared_overview.tex.j2" %}
+\vspace{8pt}
+{% include "_shared_preview_table.tex.j2" %}
+\vspace{8pt}
+{% include "_shared_full_index.tex.j2" %}
+\end{document}

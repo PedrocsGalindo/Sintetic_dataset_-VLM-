@@ -1,0 +1,22 @@
+{% if preview_table %}
+\begin{panelBox}[title={ {{ preview_table.title_escaped }} }]
+\small
+\textit{ {{ preview_table.subtitle_escaped }} }\\[4pt]
+\footnotesize
+\rowcolors{2}{HeaderFill!10}{white}
+\begin{tabularx}{\linewidth}{ {{ preview_table.column_spec }} }
+\toprule
+{% for header in preview_table.headers -%}
+\textbf{ {{ header }} }{% if not loop.last %} & {% endif %}
+{%- endfor %} \\
+\midrule
+{% for row in preview_table.rows -%}
+{% for cell in row -%}
+{{ cell }}{% if not loop.last %} & {% endif %}
+{%- endfor %} \\
+{% endfor %}
+\bottomrule
+\end{tabularx}
+\normalsize
+\end{panelBox}
+{% endif %}

@@ -86,7 +86,12 @@ class StyleSampler:
                 "editorial_blocks.html.j2",
                 "procedure_form.html.j2",
             ),
-            "latex": ("default_table.tex.j2",),
+            "latex": (
+                "executive_brief.tex.j2",
+                "editorial_report.tex.j2",
+                "data_memo.tex.j2",
+                "record_cards.tex.j2",
+            ),
             "markdown": (
                 "default_markdown",
                 "markdown_records",

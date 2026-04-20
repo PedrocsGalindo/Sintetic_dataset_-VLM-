@@ -1,0 +1,45 @@
+{% if chart %}
+\begin{panelBox}[title={ {{ chart.title_escaped }} }]
+\small
+\textit{ {{ chart.subtitle_escaped }} }\\[4pt]
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  width=0.96\linewidth,
+  height=4.0cm,
+  ybar,
+  ymin=0,
+  ymax={{ chart.y_max }},
+  bar width=9pt,
+  axis x line*=bottom,
+  axis y line*=left,
+  enlarge x limits=0.16,
+  xtick=data,
+  xticklabels={ {% for point in chart.points %}{{ point.label_escaped }}{% if not loop.last %}, {% endif %}{% endfor %} },
+  x tick label style={font=\scriptsize, align=center, rotate=18, anchor=east},
+  y tick label style={font=\scriptsize},
+  tick label style={text=BodyText},
+  ylabel={ {{ chart.y_label_escaped }} },
+  ylabel style={font=\scriptsize},
+  grid=major,
+  grid style={draw=BorderColor!25}
+]
+\addplot[
+  fill=Accent!70,
+  draw=Accent
+] coordinates {
+{% for point in chart.points %}
+({{ point.index }}, {{ point.value }})
+{% endfor %}
+};
+\end{axis}
+\end{tikzpicture}
+\end{center}
+\vspace{2pt}
+\footnotesize\textbf{Source:} {{ chart.source_label_escaped }}\hfill\textbf{Insight:} {{ chart.insight_escaped }}
+\end{panelBox}
+{% else %}
+\begin{panelBox}[title={Chart}]
+\small No stable one-column chart summary was available for this dataset, so the overview keeps the space for narrative summary and the traceable preview table.
+\end{panelBox}
+{% endif %}

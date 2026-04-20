@@ -1,0 +1,13 @@
+{% include "_shared_preamble.tex.j2" %}
+\begin{heroBox}[colback=HeaderFill!18!white]
+{\Large\bfseries {{ table.display_name_escaped }}}\\[4pt]
+\textsc{ {{ latex.layout_label_escaped }} }
+\end{heroBox}
+
+\vspace{8pt}
+{% include "_shared_overview.tex.j2" %}
+\vspace{8pt}
+{% include "_shared_preview_table.tex.j2" %}
+\vspace{8pt}
+{% include "_shared_full_index.tex.j2" %}
+\end{document}

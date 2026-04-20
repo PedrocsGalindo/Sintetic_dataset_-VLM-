@@ -1,0 +1,64 @@
+\documentclass[10pt]{article}
+\usepackage[{{ latex.geometry_options }}]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+{{ latex.font_package_block }}
+\usepackage[table]{xcolor}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{enumitem}
+\pgfplotsset{compat=1.15}
+\definecolor{Accent}{RGB}{ {{ latex.accent_rgb }} }
+\definecolor{HeaderFill}{RGB}{ {{ latex.header_rgb }} }
+\definecolor{BorderColor}{RGB}{ {{ latex.border_rgb }} }
+\definecolor{BodyText}{RGB}{ {{ latex.text_rgb }} }
+\definecolor{PaperTint}{RGB}{ {{ latex.background_rgb }} }
+\color{BodyText}
+\renewcommand{\arraystretch}{ {{ latex.arraystretch }} }
+\setlength{\tabcolsep}{ {{ latex.tabcolsep_pt }}pt }
+\setlist[itemize]{leftmargin=1.4em, itemsep=0.25em, topsep=0.2em}
+\pagestyle{empty}
+\newtcolorbox{heroBox}[1][]{
+  colback=PaperTint!96!white,
+  colframe=Accent,
+  boxrule=0.9pt,
+  sharp corners,
+  left=8pt,right=8pt,top=8pt,bottom=8pt,
+  #1
+}
+\newtcolorbox{metricBox}[1][]{
+  colback=HeaderFill!28!white,
+  colframe=BorderColor,
+  boxrule=0.6pt,
+  sharp corners,
+  left=7pt,right=7pt,top=7pt,bottom=7pt,
+  #1
+}
+\newtcolorbox{panelBox}[1][]{
+  colback=white,
+  colframe=BorderColor,
+  boxrule=0.65pt,
+  sharp corners,
+  left=8pt,right=8pt,top=8pt,bottom=8pt,
+  #1
+}
+\newtcolorbox{recordCard}[1][]{
+  enhanced,
+  breakable,
+  colback=white,
+  colframe=BorderColor,
+  boxrule=0.6pt,
+  sharp corners,
+  left=7pt,right=7pt,top=7pt,bottom=7pt,
+  #1
+}
+\begin{document}
+% LATEX_RENDER_MODE: {{ latex.render_mode }}
+% LATEX_COMPAT_TEMPLATE: default_table.tex.j2
+% PDF_TITLE: {{ latex.title_comment_escaped }}

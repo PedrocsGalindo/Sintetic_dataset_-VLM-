@@ -1,0 +1,27 @@
+{% if record_cards %}
+\section*{Record Digest}
+\noindent\textit{Preview cards keep the Record anchor visible while the full index below preserves the complete tabular traceability view.}
+
+{% for card in record_cards %}
+\begin{minipage}[t]{0.485\linewidth}
+\begin{recordCard}[title={ {{ card.record_label_escaped }} }]
+\footnotesize
+\textit{ {{ card.summary_escaped }} }
+\vspace{5pt}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.34\linewidth} >{\raggedright\arraybackslash}X@{}}
+{% for field in card.lead_fields -%}
+\textbf{ {{ field.label_escaped }} } & {{ field.value_escaped }} \\
+{% endfor %}
+{% if card.detail_fields %}
+\midrule
+{% for field in card.detail_fields -%}
+\textbf{ {{ field.label_escaped }} } & {{ field.value_escaped }} \\
+{% endfor %}
+{% endif %}
+\end{tabularx}
+\end{recordCard}
+\end{minipage}
+{% if loop.index is odd %}\hfill{% else %}\par\vspace{8pt}{% endif %}
+{% endfor %}
+{% if record_cards|length is odd %}\par{% endif %}
+{% endif %}

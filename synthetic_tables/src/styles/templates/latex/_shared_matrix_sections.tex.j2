@@ -1,0 +1,33 @@
+{% if matrix_sections %}
+\section*{Split Matrix}
+\noindent\textit{Wide categorical layouts are split into companion matrices that repeat the same Record anchor in every section.}
+
+{% for section in matrix_sections %}
+\subsection*{ {{ section.title_escaped }} }
+\noindent\textit{ {{ section.subtitle_escaped }} }
+
+\footnotesize
+\rowcolors{2}{HeaderFill!10}{white}
+\begin{longtable}{ {{ section.column_spec }} }
+\toprule
+{% for column in section.columns -%}
+{{ column.header_escaped }}{% if not loop.last %} & {% endif %}
+{%- endfor %} \\
+\midrule
+\endfirsthead
+\toprule
+{% for column in section.columns -%}
+{{ column.header_escaped }}{% if not loop.last %} & {% endif %}
+{%- endfor %} \\
+\midrule
+\endhead
+{% for row in section.rows -%}
+{% for cell in row -%}
+{{ cell }}{% if not loop.last %} & {% endif %}
+{%- endfor %} \\
+{% endfor %}
+\bottomrule
+\end{longtable}
+\normalsize
+{% endfor %}
+{% endif %}
