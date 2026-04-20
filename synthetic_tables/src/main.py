@@ -90,6 +90,9 @@ def generate_visual_samples(config: PipelineConfig) -> None:
                 style_key = f"{table.table_id}:{source_format}:{version_label}"
                 style = style_sampler.sample(source_format, style_key)
                 style_id = build_style_id(source_format, style)
+                # for testing/debugging
+                if source_format != "latex":  
+                    continue    
                 rendered_source_path = _rendered_source_path(
                     config=config,
                     source_format=source_format,

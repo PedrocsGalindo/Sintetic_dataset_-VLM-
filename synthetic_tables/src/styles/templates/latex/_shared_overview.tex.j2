@@ -1,5 +1,4 @@
 \noindent
-\begin{minipage}[t]{0.40\linewidth}
 \begin{panelBox}[title={Summary}]
 \small
 \begin{itemize}
@@ -12,7 +11,8 @@
 \textbf{ {{ metric.label_escaped }} }: {{ metric.value_escaped }}\\
 {% endfor %}
 \end{panelBox}
-\end{minipage}\hfill
-\begin{minipage}[t]{0.56\linewidth}
+
+\vspace{8pt}
+
+% The chart always gets its own full-width row so row-level labels stay readable.
 {% include "_shared_chart.tex.j2" %}
-\end{minipage}

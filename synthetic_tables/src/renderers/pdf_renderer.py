@@ -101,7 +101,7 @@ class LatexEngineRequiredError(LatexRenderError):
     ) -> None:
         self.source_path = source_path
         self.searched_executables = searched_executables
-        self.engine_env_vars = {
+        self.engine_env_vars = { 
             engine_name: tuple(env_vars)
             for engine_name, env_vars in engine_env_vars.items()
         }

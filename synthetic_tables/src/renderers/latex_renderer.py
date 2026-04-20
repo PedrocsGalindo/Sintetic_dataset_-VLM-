@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass
 import math
 from pathlib import Path
@@ -60,9 +59,11 @@ class LatexChartPointView:
 class LatexRenderer:
     """Render a generated table to a styled LaTeX string."""
 
+    _MAX_ROW_LEVEL_CHART_ROWS = 75
+    _MAX_POINTS_PER_CHART = 25
+    _CHART_POINT_SPACING = 2.0
     _NUMERIC_DTYPES = {"integer", "decimal", "percentage", "fraction"}
     _STRING_HEAVY_DTYPES = {"text_short", "date", "identifier", "alphanumeric_code", "symbolic_mixed"}
-    _CATEGORY_DTYPES = {"text_short", "date", "identifier", "alphanumeric_code", "symbolic_mixed"}
     _SAFE_TEMPLATE_NAMES = {"default_table.tex.j2"}
     _CREATIVE_TEMPLATE_NAMES = {
         "executive_brief.tex.j2",
@@ -116,14 +117,15 @@ class LatexRenderer:
             for row_index, row in enumerate(table.rows, start=1)
         ]
 
-        chart = self._select_chart(table, template_name)
+        charts = self._select_charts(table, template_name)
+        chart = charts[0] if charts else None
         metrics = self._summary_metrics(table, chart)
         preview_table = self._preview_table(table)
         record_cards = self._record_cards(table)
         detail_sections = self._detail_sections(table, style)
         matrix_sections = self._matrix_sections(table, style) if template_name == "split_matrix.tex.j2" else []
         layout_label = self._TEMPLATE_LABELS.get(template_name, "LaTeX Report")
-        insight_lines = self._insight_lines(table, layout_label, chart, len(detail_sections) > 1)
+        insight_lines = self._insight_lines(table, layout_label, charts, len(detail_sections) > 1)
         is_landscape = template_name == "split_matrix.tex.j2" or len(column_dtypes) >= 9 or sum(
             kind == "long_text" for kind in column_kinds
         ) >= 3
@@ -161,6 +163,7 @@ class LatexRenderer:
             rows=rows,
             metrics=metrics,
             chart=chart,
+            charts=charts,
             preview_table=preview_table,
             record_cards=record_cards,
             matrix_sections=matrix_sections,
@@ -454,149 +457,216 @@ class LatexRenderer:
         self,
         table: GeneratedTable,
         layout_label: str,
-        chart: dict[str, object] | None,
+        charts: list[dict[str, object]],
         has_sectioned_details: bool,
     ) -> list[str]:
         """Build short overview lines that explain the document composition."""
 
         lines = [
             f"Layout: {layout_label}.",
-            "Page 1 reserves space for the summary, one chart, and one compact traceable preview.",
+            "Page 1 reserves space for the summary, full-width chart blocks, and one compact traceable preview.",
         ]
-        if chart is not None:
-            lines.append(f"Chart: derived directly from {chart['source_label_plain']}.")
+        if charts:
+            primary_chart = charts[0]
+            lines.append(f"Chart: derived directly from {primary_chart['source_label_plain']}.")
+            lines.append("Chart blocks use the full page width so row-level labels stay readable.")
+            if len(charts) > 1:
+                lines.append(
+                    f"Chart split: the row-level series is split into {len(charts)} full-width panels with at most "
+                    f"{self._MAX_POINTS_PER_CHART} rows each."
+                )
         else:
-            lines.append("Chart: omitted because no stable one-column summary was available.")
+            if table.n_rows > self._MAX_ROW_LEVEL_CHART_ROWS:
+                lines.append("Chart: omitted because row-level LaTeX charts are limited to datasets with at most 75 rows.")
+            else:
+                lines.append("Chart: omitted because no stable one-column summary was available.")
         if has_sectioned_details:
             lines.append("Detailed rows move to later pages and are split into smaller sections with repeated Record anchors.")
         else:
             lines.append("Detailed rows move to later pages after the overview page so the PDF stays readable.")
         return [self._escape_latex(line) for line in lines]
 
-    def _select_chart(self, table: GeneratedTable, template_name: str) -> dict[str, object] | None:
-        """Choose one compact chart using a deterministic, data-driven rule."""
+    def _select_charts(self, table: GeneratedTable, template_name: str) -> list[dict[str, object]]:
+        """Choose row-level LaTeX charts using deterministic, readability-first rules."""
 
-        if template_name in {"editorial_report.tex.j2", "record_cards.tex.j2", "split_matrix.tex.j2"}:
-            preferred_kinds = ("category", "numeric")
-        else:
-            preferred_kinds = ("numeric", "category")
+        _ = template_name
+        if table.n_rows > self._MAX_ROW_LEVEL_CHART_ROWS:
+            return []
+        return self._row_level_numeric_charts(table)
 
-        for chart_kind in preferred_kinds:
-            if chart_kind == "numeric":
-                chart = self._numeric_chart(table)
-            else:
-                chart = self._category_chart(table)
-            if chart is not None:
-                return chart
-        return None
-
-    def _numeric_chart(self, table: GeneratedTable) -> dict[str, object] | None:
-        """Build a compact distribution chart from the first suitable numeric column."""
+    def _row_level_numeric_charts(self, table: GeneratedTable) -> list[dict[str, object]]:
+        """Plot one numeric column directly against a traceable row-level x-axis."""
 
         for column_schema in table.schema.columns:
             if column_schema.dtype not in self._NUMERIC_DTYPES:
                 continue
-            values = [
-                numeric_value
-                for numeric_value in (
-                    self._numeric_value(row.get(column_schema.name), column_schema.dtype)
-                    for row in table.rows
+
+            numeric_rows: list[dict[str, object]] = []
+            for row_index, row in enumerate(table.rows, start=1):
+                numeric_value = self._numeric_value(row.get(column_schema.name), column_schema.dtype)
+                if numeric_value is None:
+                    continue
+                numeric_rows.append(
+                    {
+                        "row_index": row_index,
+                        "row": row,
+                        "numeric_value": numeric_value,
+                    }
                 )
-                if numeric_value is not None
-            ]
-            if len(values) < 4:
+
+            if len(numeric_rows) < 4:
                 continue
 
+            x_axis = self._chart_x_axis(table, numeric_rows)
+            values = [float(point["numeric_value"]) for point in numeric_rows]
             minimum = min(values)
             maximum = max(values)
-            if math.isclose(minimum, maximum):
-                bin_labels = [self._chart_label(self._format_numeric(minimum))]
-                bin_counts = [len(values)]
-            else:
-                bin_count = min(5, max(4, math.ceil(math.sqrt(len(values)))))
-                width = (maximum - minimum) / bin_count
-                bin_counts = [0 for _ in range(bin_count)]
-                for value in values:
-                    if math.isclose(value, maximum):
-                        index = bin_count - 1
-                    else:
-                        index = min(bin_count - 1, max(0, int((value - minimum) / width)))
-                    bin_counts[index] += 1
-                bin_labels = [
-                    self._chart_label(
-                        f"{self._format_numeric(minimum + width * index)} to "
-                        f"{self._format_numeric(minimum + width * (index + 1))}"
-                    )
-                    for index in range(bin_count)
-                ]
 
-            points = [
-                LatexChartPointView(
-                    index=index,
-                    label_escaped=self._escape_latex(label),
-                    value=float(count),
-                    value_label_escaped=self._escape_latex(str(count)),
-                )
-                for index, (label, count) in enumerate(zip(bin_labels, bin_counts))
+            y_padding = max(1.0, abs(maximum) * 0.12)
+            y_min = min(0.0, minimum - y_padding)
+            y_max = max(2.0, maximum + y_padding)
+            chart_chunks = [
+                x_axis["points"][start : start + self._MAX_POINTS_PER_CHART]
+                for start in range(0, len(x_axis["points"]), self._MAX_POINTS_PER_CHART)
             ]
-            if not points:
-                return None
+            charts: list[dict[str, object]] = []
+            for chunk_index, chart_chunk in enumerate(chart_chunks, start=1):
+                points = [
+                    LatexChartPointView(
+                        index=float(
+                            self._chart_point_index(
+                                raw_index_label=str(point["index_label"]),
+                                fallback_row_index=int(point["row_index"]),
+                            )
+                        ),
+                        label_escaped=self._escape_latex(self._chart_label(str(point["label"]))),
+                        value=float(point["numeric_value"]),
+                        value_label_escaped=self._escape_latex(self._format_numeric(float(point["numeric_value"]))),
+                    )
+                    for point in chart_chunk
+                ]
+                if not points:
+                    continue
+                title_plain = f"{self._display_name(column_schema.name)} by {x_axis['axis_label_plain']}"
+                if len(chart_chunks) > 1:
+                    chunk_start = 1 + (chunk_index - 1) * self._MAX_POINTS_PER_CHART
+                    chunk_end = chunk_start + len(points) - 1
+                    title_plain = f"{title_plain} (Rows {chunk_start}-{chunk_end})"
+                charts.append(
+                    {
+                        "kind": "row-level-numeric",
+                        "title_escaped": self._escape_latex(title_plain),
+                        "subtitle_escaped": self._escape_latex(
+                            f"Direct row-level values from {len(points)} source rows"
+                        ),
+                        "source_label_plain": self._display_name(column_schema.name),
+                        "source_label_escaped": self._escape_latex(
+                            f"{self._display_name(column_schema.name)} vs {x_axis['axis_label_plain']}"
+                        ),
+                        "x_label_escaped": self._escape_latex(x_axis["axis_label_plain"]),
+                        "y_label_escaped": self._escape_latex(self._display_name(column_schema.name)),
+                        "insight_escaped": self._escape_latex(
+                            f"{x_axis['insight_plain']} Range: {self._format_numeric(minimum)} to {self._format_numeric(maximum)}."
+                        ),
+                        "points": points,
+                        "y_min": y_min,
+                        "y_max": y_max,
+                        "x_max": max(point.index for point in points) + 1.0,
+                    }
+                )
+            return charts
+        return []
 
-            return {
-                "kind": "numeric",
-                "title_escaped": self._escape_latex(f"Distribution of {self._display_name(column_schema.name)}"),
-                "subtitle_escaped": self._escape_latex("Counts per value band"),
-                "source_label_plain": self._display_name(column_schema.name),
-                "source_label_escaped": self._escape_latex(self._display_name(column_schema.name)),
-                "x_label_escaped": self._escape_latex("Value band"),
-                "y_label_escaped": self._escape_latex("Count"),
-                "insight_escaped": self._escape_latex(
-                    f"Range: {self._format_numeric(minimum)} to {self._format_numeric(maximum)}"
-                ),
-                "points": points,
-                "y_max": max(2.0, float(max(point.value for point in points) + 1.0)),
-            }
-        return None
-
-    def _category_chart(self, table: GeneratedTable) -> dict[str, object] | None:
-        """Build a compact top-frequency chart from the first repeated categorical column."""
+    def _chart_x_axis(
+        self,
+        table: GeneratedTable,
+        numeric_rows: list[dict[str, object]],
+    ) -> dict[str, object]:
+        """Choose a traceable row-level x-axis for the LaTeX chart."""
 
         for column_schema in table.schema.columns:
-            if column_schema.dtype not in self._CATEGORY_DTYPES:
+            if column_schema.dtype != "date":
                 continue
-            values = [str(row.get(column_schema.name)).strip() for row in table.rows if row.get(column_schema.name) is not None]
-            values = [value for value in values if value]
-            if len(values) < 4:
+            labels = self._axis_labels_for_column(numeric_rows, column_schema.name)
+            if labels is None:
                 continue
-            counts = Counter(values)
-            if len(counts) <= 1 or len(counts) >= len(values):
-                continue
-
-            top_values = counts.most_common(5)
-            points = [
-                LatexChartPointView(
-                    index=index,
-                    label_escaped=self._escape_latex(self._chart_label(value)),
-                    value=float(count),
-                    value_label_escaped=self._escape_latex(str(count)),
-                )
-                for index, (value, count) in enumerate(top_values)
-            ]
             return {
-                "kind": "category",
-                "title_escaped": self._escape_latex(f"Top {self._display_name(column_schema.name)} frequencies"),
-                "subtitle_escaped": self._escape_latex("Most frequent observed values"),
-                "source_label_plain": self._display_name(column_schema.name),
-                "source_label_escaped": self._escape_latex(self._display_name(column_schema.name)),
-                "x_label_escaped": self._escape_latex(self._display_name(column_schema.name)),
-                "y_label_escaped": self._escape_latex("Count"),
-                "insight_escaped": self._escape_latex(
-                    f"Highest frequency: {top_values[0][0]} ({top_values[0][1]})"
+                "axis_label_plain": self._display_name(column_schema.name),
+                "points": labels,
+                "insight_plain": (
+                    f"Unique dates on the x-axis preserve direct row traceability for each source row."
                 ),
-                "points": points,
-                "y_max": max(2.0, float(max(point.value for point in points) + 1.0)),
             }
-        return None
+
+        for column_schema in table.schema.columns:
+            if column_schema.dtype not in {"identifier", "alphanumeric_code"}:
+                continue
+            labels = self._axis_labels_for_column(numeric_rows, column_schema.name)
+            if labels is None:
+                continue
+            return {
+                "axis_label_plain": self._display_name(column_schema.name),
+                "points": labels,
+                "insight_plain": (
+                    "Repeated dates prevented a date x-axis, so the chart uses a stable record identifier instead."
+                ),
+            }
+
+        return {
+            "axis_label_plain": "Record",
+            "points": [
+                {
+                    "label": f"{int(point['row_index']):03d}",
+                    "index_label": f"{int(point['row_index']):03d}",
+                    "row_index": int(point["row_index"]),
+                    "numeric_value": float(point["numeric_value"]),
+                }
+                for point in numeric_rows
+            ],
+            "insight_plain": (
+                "Repeated or unavailable dates prevented a unique date axis, so the chart uses explicit row indices."
+            ),
+        }
+
+    def _axis_labels_for_column(
+        self,
+        numeric_rows: list[dict[str, object]],
+        column_name: str,
+    ) -> list[dict[str, object]] | None:
+        """Return row-aligned labels when one candidate x-axis column is complete and unique."""
+
+        labels: list[dict[str, object]] = []
+        seen_labels: set[str] = set()
+        for point in numeric_rows:
+            raw_label = point["row"].get(column_name)
+            if raw_label is None:
+                return None
+            label = str(raw_label).strip()
+            if not label or label in seen_labels:
+                return None
+            seen_labels.add(label)
+            labels.append(
+                {
+                    "label": label,
+                    "index_label": label,
+                    "row_index": int(point["row_index"]),
+                    "numeric_value": float(point["numeric_value"]),
+                }
+            )
+        return labels
+
+    @staticmethod
+    def _chart_point_index(raw_index_label: str, fallback_row_index: int) -> int:
+        """Convert one chart index token into a numeric-only deterministic LaTeX x position."""
+
+        digit_groups = [chunk for chunk in "".join(ch if ch.isdigit() else " " for ch in raw_index_label).split() if chunk]
+        if digit_groups:
+            numeric_index = int(digit_groups[-1])
+        else:
+            numeric_index = int(fallback_row_index)
+        if numeric_index <= 0:
+            numeric_index = int(fallback_row_index)
+        return min(numeric_index, 999)
 
     def _should_use_split_matrix(self, table: GeneratedTable) -> bool:
         """Detect when wide categorical layouts need a split-matrix presentation."""

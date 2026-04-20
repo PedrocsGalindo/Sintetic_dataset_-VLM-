@@ -1,4 +1,5 @@
-{% if chart %}
+{% if charts %}
+{% for chart in charts %}
 \begin{panelBox}[title={ {{ chart.title_escaped }} }]
 \small
 \textit{ {{ chart.subtitle_escaped }} }\\[4pt]
@@ -8,17 +9,21 @@
   width=0.96\linewidth,
   height=4.0cm,
   ybar,
-  ymin=0,
+  xmin=-1.0,
+  xmax={{ chart.x_max }},
+  ymin={{ chart.y_min }},
   ymax={{ chart.y_max }},
-  bar width=9pt,
+  bar width=7pt,
   axis x line*=bottom,
   axis y line*=left,
-  enlarge x limits=0.16,
-  xtick=data,
+  enlarge x limits=0.04,
+  xtick={ {% for point in chart.points %}{{ point.index }}{% if not loop.last %}, {% endif %}{% endfor %} },
   xticklabels={ {% for point in chart.points %}{{ point.label_escaped }}{% if not loop.last %}, {% endif %}{% endfor %} },
   x tick label style={font=\scriptsize, align=center, rotate=18, anchor=east},
   y tick label style={font=\scriptsize},
   tick label style={text=BodyText},
+  xlabel={ {{ chart.x_label_escaped }} },
+  xlabel style={font=\scriptsize},
   ylabel={ {{ chart.y_label_escaped }} },
   ylabel style={font=\scriptsize},
   grid=major,
@@ -38,8 +43,10 @@
 \vspace{2pt}
 \footnotesize\textbf{Source:} {{ chart.source_label_escaped }}\hfill\textbf{Insight:} {{ chart.insight_escaped }}
 \end{panelBox}
+{% if not loop.last %}\vspace{8pt}{% endif %}
+{% endfor %}
 {% else %}
 \begin{panelBox}[title={Chart}]
-\small No stable one-column chart summary was available for this dataset, so the overview keeps the space for narrative summary and the traceable preview table.
+\small No stable one-column row-level chart was available for this dataset, so the overview keeps the space for narrative summary and the traceable preview table.
 \end{panelBox}
 {% endif %}
