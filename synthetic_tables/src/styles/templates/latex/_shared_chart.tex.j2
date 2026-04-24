@@ -49,10 +49,17 @@
 ]
 \addplot[
   fill=Accent!70,
-  draw=Accent
+  draw=Accent,
+  nodes near coords,
+  point meta=explicit symbolic,
+  every node near coord/.append style={
+    font=\scriptsize,
+    text=BodyText,
+    anchor=south
+  }
 ] coordinates {
 {% for point in chart.points %}
-({{ point.plot_position }}, {{ point.value }})
+({{ point.plot_position }}, {{ point.value }}) [{{ point.value_label_escaped }}]
 {% endfor %}
 };
 \end{axis}
