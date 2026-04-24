@@ -1,25 +1,43 @@
 {% if charts %}
 {% for chart in charts %}
+{% set point_count = chart.points|length %}
+{% if point_count <= 5 %}
+{% set bar_width = "4.5pt" %}
+{% set enlarge_x_limits = "0.28" %}
+{% set x_tick_label_style = "font=\\scriptsize, align=center, rotate=0, anchor=north, text width=0.16\\linewidth" %}
+{% elif point_count <= 8 %}
+{% set bar_width = "5.5pt" %}
+{% set enlarge_x_limits = "0.18" %}
+{% set x_tick_label_style = "font=\\scriptsize, align=center, rotate=12, anchor=north east, text width=0.14\\linewidth" %}
+{% elif point_count <= 12 %}
+{% set bar_width = "6pt" %}
+{% set enlarge_x_limits = "0.10" %}
+{% set x_tick_label_style = "font=\\scriptsize, align=center, rotate=18, anchor=east, text width=0.11\\linewidth" %}
+{% else %}
+{% set bar_width = "7pt" %}
+{% set enlarge_x_limits = "0.04" %}
+{% set x_tick_label_style = "font=\\scriptsize, align=center, rotate=18, anchor=east" %}
+{% endif %}
 \begin{panelBox}[title={ {{ chart.title_escaped }} }]
 \small
 \textit{ {{ chart.subtitle_escaped }} }\\[4pt]
 \begin{center}
 \begin{tikzpicture}
 \begin{axis}[
-  width=0.96\linewidth,
+  width=0.99\linewidth,
   height=4.0cm,
   ybar,
   xmin=-1.0,
   xmax={{ chart.x_max }},
   ymin={{ chart.y_min }},
   ymax={{ chart.y_max }},
-  bar width=7pt,
+  bar width={{ bar_width }},
   axis x line*=bottom,
   axis y line*=left,
-  enlarge x limits=0.04,
-  xtick={ {% for point in chart.points %}{{ point.index }}{% if not loop.last %}, {% endif %}{% endfor %} },
-  xticklabels={ {% for point in chart.points %}{{ point.label_escaped }}{% if not loop.last %}, {% endif %}{% endfor %} },
-  x tick label style={font=\scriptsize, align=center, rotate=18, anchor=east},
+  enlarge x limits={{ enlarge_x_limits }},
+  xtick={ {% for point in chart.points %}{{ point.plot_position }}{% if not loop.last %}, {% endif %}{% endfor %} },
+  xticklabels={ {% for point in chart.points %}{{ point.index }}{% if not loop.last %}, {% endif %}{% endfor %} },
+  x tick label style={ {{ x_tick_label_style }} },
   y tick label style={font=\scriptsize},
   tick label style={text=BodyText},
   xlabel={ {{ chart.x_label_escaped }} },
@@ -34,7 +52,7 @@
   draw=Accent
 ] coordinates {
 {% for point in chart.points %}
-({{ point.index }}, {{ point.value }})
+({{ point.plot_position }}, {{ point.value }})
 {% endfor %}
 };
 \end{axis}

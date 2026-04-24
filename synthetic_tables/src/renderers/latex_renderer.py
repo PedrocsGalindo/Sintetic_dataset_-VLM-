@@ -51,6 +51,7 @@ class LatexChartPointView:
     """Represent one compact chart point."""
 
     index: int
+    plot_position: float
     label_escaped: str
     value: float
     value_label_escaped: str
@@ -533,17 +534,16 @@ class LatexRenderer:
             for chunk_index, chart_chunk in enumerate(chart_chunks, start=1):
                 points = [
                     LatexChartPointView(
-                        index=float(
-                            self._chart_point_index(
-                                raw_index_label=str(point["index_label"]),
-                                fallback_row_index=int(point["row_index"]),
-                            )
+                        index=self._chart_point_index(
+                            raw_index_label=f"{int(point['row_index']):03d}",
+                            fallback_row_index=int(point["row_index"]),
                         ),
-                        label_escaped=self._escape_latex(self._chart_label(str(point["label"]))),
+                        plot_position=float(index) * self._CHART_POINT_SPACING,
+                        label_escaped=self._escape_latex(f"{int(point['row_index']):03d}"), # coloca o valor do Record com base no indece, errado nao esta
                         value=float(point["numeric_value"]),
                         value_label_escaped=self._escape_latex(self._format_numeric(float(point["numeric_value"]))),
                     )
-                    for point in chart_chunk
+                    for index, point in enumerate(chart_chunk)
                 ]
                 if not points:
                     continue
@@ -571,7 +571,7 @@ class LatexRenderer:
                         "points": points,
                         "y_min": y_min,
                         "y_max": y_max,
-                        "x_max": max(point.index for point in points) + 1.0,
+                        "x_max": max(point.plot_position for point in points) + self._CHART_POINT_SPACING,
                     }
                 )
             return charts
