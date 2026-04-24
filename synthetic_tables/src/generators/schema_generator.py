@@ -103,11 +103,13 @@ class SchemaGenerator:
         max_columns: int = 12,
         min_rows: int = 40,
         max_rows: int = 100,
+        allow_nullable_cells: bool = False,
     ) -> None:
         self.min_columns = min_columns
         self.max_columns = max_columns
         self.min_rows = min_rows
         self.max_rows = max_rows
+        self.allow_nullable_cells = allow_nullable_cells
 
     def generate(
         self,
@@ -211,7 +213,7 @@ class SchemaGenerator:
 
         base_name = rng.choice(COLUMN_NAME_CANDIDATES[dtype])
         name = self._make_unique_name(base_name, index, used_names)
-        nullable = rng.random() < 0.85
+        nullable = self.allow_nullable_cells and rng.random() < 0.85
         null_probability = round(rng.uniform(0.03, 0.12), 3) if nullable else 0.0
         metadata: dict[str, Any] = {"null_probability": null_probability}
 

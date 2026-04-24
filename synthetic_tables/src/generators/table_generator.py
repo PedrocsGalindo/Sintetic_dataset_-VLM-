@@ -36,7 +36,17 @@ class GeneratedTable:
     def row_values(self) -> list[list[Any]]:
         """Return rows ordered by the schema column order."""
 
-        return [[row.get(column) for column in self.columns] for row in self.rows]
+        row_values: list[list[Any]] = []
+        for row_index, row in enumerate(self.rows, start=1):
+            ordered_row: list[Any] = []
+            for column in self.columns:
+                if column not in row:
+                    raise KeyError(
+                        f"Missing value for column '{column}' in row {row_index} of table '{self.name}'."
+                    )
+                ordered_row.append(row[column])
+            row_values.append(ordered_row)
+        return row_values
 
 
 class TableGenerator:
