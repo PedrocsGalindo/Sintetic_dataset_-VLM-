@@ -51,6 +51,7 @@ class LatexChartPointView:
     """Represent one compact chart point."""
 
     index: int
+    index_label_escaped: str
     plot_position: float
     label_escaped: str
     value: float
@@ -532,19 +533,24 @@ class LatexRenderer:
             ]
             charts: list[dict[str, object]] = []
             for chunk_index, chart_chunk in enumerate(chart_chunks, start=1):
-                points = [
-                    LatexChartPointView(
-                        index=self._chart_point_index(
-                            raw_index_label=f"{int(point['row_index']):03d}",
-                            fallback_row_index=int(point["row_index"]),
-                        ),
-                        plot_position=float(index) * self._CHART_POINT_SPACING,
-                        label_escaped=self._escape_latex(f"{int(point['row_index']):03d}"), # coloca o valor do Record com base no indece, errado nao esta
-                        value=float(point["numeric_value"]),
-                        value_label_escaped=self._escape_latex(self._format_numeric(float(point["numeric_value"]))),
+                points: list[LatexChartPointView] = []
+                for index, point in enumerate(chart_chunk):
+                    record_label = f"{int(point['row_index']):03d}"
+                    points.append(
+                        LatexChartPointView(
+                            index=self._chart_point_index(
+                                raw_index_label=record_label,
+                                fallback_row_index=int(point["row_index"]),
+                            ),
+                            index_label_escaped=self._escape_latex(record_label),
+                            plot_position=float(index) * self._CHART_POINT_SPACING,
+                            label_escaped=self._escape_latex(record_label),
+                            value=float(point["numeric_value"]),
+                            value_label_escaped=self._escape_latex(
+                                self._format_numeric(float(point["numeric_value"]))
+                            ),
+                        )
                     )
-                    for index, point in enumerate(chart_chunk)
-                ]
                 if not points:
                     continue
                 title_plain = f"{self._display_name(column_schema.name)} by {x_axis['axis_label_plain']}"

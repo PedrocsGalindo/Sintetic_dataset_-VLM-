@@ -36,7 +36,7 @@
   axis y line*=left,
   enlarge x limits={{ enlarge_x_limits }},
   xtick={ {% for point in chart.points %}{{ point.plot_position }}{% if not loop.last %}, {% endif %}{% endfor %} },
-  xticklabels={ {% for point in chart.points %}{{ point.index }}{% if not loop.last %}, {% endif %}{% endfor %} },
+  xticklabels={ {% for point in chart.points %}{{ point.index_label_escaped }}{% if not loop.last %}, {% endif %}{% endfor %} },
   x tick label style={ {{ x_tick_label_style }} },
   y tick label style={font=\scriptsize},
   tick label style={text=BodyText},
