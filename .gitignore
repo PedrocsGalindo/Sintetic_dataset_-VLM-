@@ -2,3 +2,4 @@
 .venv/
 synthetic_tables/data
 data/
+env/
