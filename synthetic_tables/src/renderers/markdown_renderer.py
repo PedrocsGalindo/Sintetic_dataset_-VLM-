@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from generators.table_generator import GeneratedTable
-from styles.style_sampler import TableStyle
+from styles.style_sampler import SIMPLE_LAYOUT_NAME, TableStyle
 from utils.io import write_text_file
 
 
@@ -47,32 +47,95 @@ class MarkdownLayoutProfile:
 class MarkdownRenderer:
     """Render a generated table into multiple markdown layout styles."""
 
+    _RECORD_HEADER = "Record"
+    _FIRST_TEMPLATE_NAME = SIMPLE_LAYOUT_NAME
+    _FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS = 5
+
     def render(self, table: GeneratedTable, style: TableStyle | None = None) -> str:
         """Create a Markdown representation."""
 
-        template_name = style.template_name if style else "default_markdown"
-        records = self._build_records(table)
-        layout_profile = self._layout_profile(table)
+        template_name = style.template_name if style else SIMPLE_LAYOUT_NAME
         title = self._style_comment(style, template_name)
         rendered_title = self._display_name(table.name)
 
-        if template_name == "markdown_records":
-            body = self._render_record_list(table, records, layout_profile)
-        elif template_name == "markdown_mixed":
-            body = self._render_mixed_layout(table, records, layout_profile)
-        elif template_name == "markdown_briefing":
-            body = self._render_briefing_layout(table, records, layout_profile)
+        if template_name == SIMPLE_LAYOUT_NAME:
+            body = self._render_simple_tabular_layout(table, style, template_name)
         else:
-            body = self._render_table_layout(table, style, layout_profile)
+            records = self._build_records(table)
+            layout_profile = self._layout_profile(table)
+            if template_name == "markdown_records":
+                body = self._render_record_list(table, records, layout_profile)
+            elif template_name == "markdown_mixed":
+                body = self._render_mixed_layout(table, records, layout_profile)
+            elif template_name == "markdown_briefing":
+                body = self._render_briefing_layout(table, records, layout_profile)
+            else:
+                body = self._render_table_layout(table, style, layout_profile)
 
         return "\n".join([title, f"# {rendered_title}", "", body]).rstrip() + "\n"
 
-    def render_to_file(self, table: GeneratedTable, output_path: Path, style: TableStyle | None = None) -> Path:
-        """Write a rendered Markdown file to disk."""
+    def _render_simple_tabular_layout(
+        self,
+        table: GeneratedTable,
+        style: TableStyle | None,
+        template_name: str,
+    ) -> str:
+        """Render a minimal tabular Markdown layout without extra document sections."""
 
-        markdown = self.render(table, style)
-        write_text_file(output_path, markdown)
-        return output_path
+        lines = [
+            f"Rows: {table.n_rows}",
+            f"Columns: {table.n_cols}",
+            "",
+            self._render_partitioned_plain_table(table, style, template_name),
+        ]
+        return "\n".join(lines).rstrip()
+
+    def _render_plain_table(self, table: GeneratedTable, style: TableStyle | None) -> str:
+        """Render one plain Markdown table without any alternate record layout."""
+
+        return self._render_plain_table_for_columns(table, style, list(table.columns))
+
+    def _render_partitioned_plain_table(
+        self,
+        table: GeneratedTable,
+        style: TableStyle | None,
+        template_name: str,
+    ) -> str:
+        """Split the first dense Markdown template into Record-anchored blocks."""
+
+        visible_column_count = 1 + len(table.columns)
+        if template_name != self._FIRST_TEMPLATE_NAME or visible_column_count <= self._FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS:
+            return self._render_plain_table(table, style)
+
+        data_columns_per_block = max(1, self._FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS - 1)
+        blocks: list[str] = []
+        for block_index, start in enumerate(range(0, len(table.columns), data_columns_per_block), start=1):
+            columns = list(table.columns[start : start + data_columns_per_block])
+            blocks.append(f"## Block {block_index}")
+            blocks.append("")
+            blocks.append(self._render_plain_table_for_columns(table, style, columns))
+            blocks.append("")
+        return "\n".join(blocks).rstrip()
+
+    def _render_plain_table_for_columns(
+        self,
+        table: GeneratedTable,
+        style: TableStyle | None,
+        columns: list[str],
+    ) -> str:
+        """Render a Markdown table with Record plus the requested real columns."""
+
+        header_cells = [self._RECORD_HEADER, *[self._display_name(column) for column in columns]]
+        separator_cells = [":---", *self._separator_cells_for_columns(table, style, columns)]
+        rows = [
+            "| "
+            + " | ".join([self._row_label(row_index), *[self._escape_cell(row.get(column)) for column in columns]])
+            + " |"
+            for row_index, row in enumerate(table.rows, start=1)
+        ]
+        header = "| " + " | ".join(header_cells) + " |"
+        separator = "| " + " | ".join(separator_cells) + " |"
+        return "\n".join([header, separator, *rows])
 
     def _render_table_layout(
         self,
@@ -85,13 +148,7 @@ class MarkdownRenderer:
         if layout_profile.split_matrices:
             return self._render_split_table_layout(table, style, layout_profile)
 
-        header = "| " + " | ".join(self._display_name(column) for column in table.columns) + " |"
-        separator = "| " + " | ".join(self._separator_cells(table, style)) + " |"
-        rows = [
-            "| " + " | ".join(self._escape_cell(row.get(column)) for column in table.columns) + " |"
-            for row in table.rows
-        ]
-        return "\n".join([header, separator, *rows])
+        return self._render_plain_table(table, style)
 
     def _render_record_list(
         self,
@@ -132,6 +189,14 @@ class MarkdownRenderer:
                 lines.extend(f"- **{field.label}:** {self._escape_inline(field.value)}" for field in record.fields)
                 lines.append("")
         return "\n".join(lines).rstrip()
+
+    def render_to_file(self, table: GeneratedTable, output_path: Path, style: TableStyle | None = None) -> Path:
+        """Write a rendered Markdown file to disk."""
+
+        markdown = self.render(table, style)
+        write_text_file(output_path, markdown)
+        return output_path
+
 
     def _render_mixed_layout(
         self,
@@ -261,7 +326,7 @@ class MarkdownRenderer:
             narrative = self._narrative_for(fields, text_fields, compact_fields)
             fields_by_row.append(
                 MarkdownRecordView(
-                    record_label=f"Record {row_index:03d}",
+                    record_label=self._row_label(row_index),
                     fields=fields,
                     line_fields=line_fields,
                     detail_fields=detail_fields,
@@ -298,18 +363,8 @@ class MarkdownRenderer:
         for group_label, columns in column_groups:
             if not columns:
                 continue
-            lines.extend([f"## {group_label}", "", f"_Shared anchor: every row repeats its record label in this matrix._", ""])
-            header_cells = ["Record", *[self._display_name(column) for column in columns]]
-            separator_cells = [":---"]
-            for column_schema in table.schema.columns:
-                if column_schema.name in columns:
-                    separator_cells.append(self._separator_cell_for_dtype(column_schema.dtype, alignment_profile))
-            lines.append("| " + " | ".join(header_cells) + " |")
-            lines.append("| " + " | ".join(separator_cells) + " |")
-            for row_index, row in enumerate(table.rows, start=1):
-                row_cells = [f"Record {row_index:03d}"]
-                row_cells.extend(self._escape_cell(row.get(column)) for column in columns)
-                lines.append("| " + " | ".join(row_cells) + " |")
+            lines.extend([f"## {group_label}", "", "_Shared anchor: every row repeats its record label in this matrix._", ""])
+            lines.append(self._render_plain_table_for_columns(table, style, list(columns)))
             lines.append("")
 
         return "\n".join(lines).rstrip()
@@ -317,10 +372,21 @@ class MarkdownRenderer:
     def _separator_cells(self, table: GeneratedTable, style: TableStyle | None) -> list[str]:
         """Build Markdown alignment cells."""
 
+        return self._separator_cells_for_columns(table, style, list(table.columns))
+
+    def _separator_cells_for_columns(
+        self,
+        table: GeneratedTable,
+        style: TableStyle | None,
+        columns: list[str],
+    ) -> list[str]:
+        """Build Markdown alignment cells for a subset of real columns."""
+
         alignment_profile = style.alignment_profile if style else "mixed"
         cells: list[str] = []
         for column in table.schema.columns:
-            cells.append(self._separator_cell_for_dtype(column.dtype, alignment_profile))
+            if column.name in columns:
+                cells.append(self._separator_cell_for_dtype(column.dtype, alignment_profile))
         return cells
 
     @staticmethod
@@ -328,6 +394,12 @@ class MarkdownRenderer:
         """Convert internal slugs into reader-friendly labels."""
 
         return value.replace("_", " ").title()
+
+    @staticmethod
+    def _row_label(row_index: int) -> str:
+        """Return the renderer-owned Record value for one table row."""
+
+        return f"Record {row_index:03d}"
 
     @staticmethod
     def _escape_cell(value: object) -> str:

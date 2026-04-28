@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{{ document.title }} - synthetic document</title>
+  <title>{{ document.title }} - simple tabular</title>
   <style>
     :root {
       --page-bg: {{ style.background_color }};
@@ -25,22 +25,20 @@
     body {
       margin: 0;
       padding: 24px;
-      background:
-        radial-gradient(circle at top left, rgba(255,255,255,0.88), transparent 32%),
-        linear-gradient(180deg, #eef5fb 0%, var(--page-bg) 100%);
+      background: linear-gradient(180deg, #f5f8fb 0%, var(--page-bg) 100%);
       color: var(--text-color);
       font-family: var(--font-family), serif;
       font-size: var(--font-size);
       line-height: var(--line-height);
     }
 
-    .table-wrap {
+    .sheet {
       width: var(--sheet-width);
       margin: 0 auto;
       padding: 20px;
       background: #ffffff;
       border: 1px {{ css.border_style }} var(--border-color);
-      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
       max-width: 100%;
       overflow: hidden;
     }
@@ -50,53 +48,60 @@
       align-items: flex-start;
       justify-content: space-between;
       gap: 18px;
-      margin-bottom: 14px;
+      margin-bottom: 16px;
     }
 
-    .table-title {
+    .title {
       margin: 0 0 8px 0;
       color: var(--accent-color);
       font-size: calc(var(--font-size) * 1.2);
-      letter-spacing: 0.03em;
     }
 
     .subtitle {
       margin: 0;
-      max-width: 72ch;
-      opacity: 0.82;
+      opacity: 0.8;
     }
 
     .stats {
       display: grid;
-      grid-template-columns: repeat(2, minmax(90px, 1fr));
+      grid-template-columns: repeat(2, minmax(96px, 1fr));
       gap: 10px;
-      min-width: 240px;
+      min-width: 220px;
     }
 
     .stat {
-      border: 1px solid rgba(92, 107, 122, 0.26);
-      background: rgba(248, 250, 252, 0.88);
       padding: 10px 12px;
+      border: 1px solid rgba(92, 107, 122, 0.22);
+      background: rgba(248, 250, 252, 0.92);
     }
 
     .stat-label {
       display: block;
-      font-size: 0.74em;
-      letter-spacing: 0.08em;
+      font-size: 0.72em;
       text-transform: uppercase;
+      letter-spacing: 0.08em;
       opacity: 0.72;
     }
 
     .stat-value {
       display: block;
       margin-top: 5px;
-      font-size: 1.1em;
       font-weight: 700;
     }
 
     .table-scroll {
       width: 100%;
       overflow-x: auto;
+    }
+
+    .table-block + .table-block {
+      margin-top: 18px;
+    }
+
+    .block-title {
+      margin: 0 0 8px 0;
+      font-size: calc(var(--font-size) * 0.95);
+      color: var(--accent-color);
     }
 
     table {
@@ -151,10 +156,10 @@
   </style>
 </head>
 <body>
-  <section class="table-wrap">
+  <section class="sheet">
     <header class="masthead">
       <div>
-        <h1 class="table-title">{{ document.title }}</h1>
+        <h1 class="title">{{ document.title }}</h1>
         <p class="subtitle">{{ document.subtitle }}</p>
       </div>
       <div class="stats">
@@ -166,26 +171,34 @@
         {% endfor %}
       </div>
     </header>
+    {% for section in table_sections %}
+    <section class="table-block">
+      {% if table_sections|length > 1 %}
+      <h2 class="block-title">{{ section.title }}</h2>
+      {% endif %}
     <div class="table-scroll">
       <table aria-label="{{ table.name }}">
         <thead>
           <tr>
-            {% for column in columns %}
-            <th class="col-{{ loop.index0 }} kind-{{ column.kind }}">{{ column.display_name }}</th>
+            {% for column in section.columns %}
+            <th class="col-{{ loop.index0 }} kind-{{ column.kind }}" style="text-align: {{ column.alignment }}; width: {{ column.width }};">{{ column.display_name }}</th>
             {% endfor %}
           </tr>
         </thead>
         <tbody>
-          {% for row in rows %}
+          {% for row in section.rows %}
           <tr>
             {% for cell in row %}
-            <td class="col-{{ loop.index0 }} kind-{{ columns[loop.index0].kind }}">{{ cell }}</td>
+            {% set column = section.columns[loop.index0] %}
+            <td class="col-{{ loop.index0 }} kind-{{ column.kind }}" style="text-align: {{ column.alignment }}; width: {{ column.width }};">{{ cell }}</td>
             {% endfor %}
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+    </section>
+    {% endfor %}
   </section>
 </body>
 </html>

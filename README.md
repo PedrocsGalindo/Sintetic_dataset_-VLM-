@@ -1,266 +1,364 @@
 # synthetic_tables
 
-> Built with Codex GPT-5.4
+`synthetic_tables` e um projeto Python modular para gerar datasets sinteticos de tabelas voltados a OCR, extracao de tabelas e avaliacao de sistemas VLM/document understanding.
 
-`synthetic_tables` is a modular Python project for generating synthetic table datasets aimed at OCR and table extraction workflows.
+O pipeline gera uma mesma tabela estruturada em varios artefatos: schema JSON, CSV, XLSX, fontes intermediarias em HTML/LaTeX/Markdown, PDFs renderizados, imagens PNG por pagina e metadados JSONL. A ideia e manter a rastreabilidade do conteudo tabular enquanto varia formato, estilo, layout e DPI de rasterizacao.
 
-The purpose of this repository is to create document-like, visually varied table layouts for information extraction experiments. It generates the same structured content across different formats, styles, and rendering variables so you can test OCR pipelines and VLM-based document understanding systems under a range of layout conditions.
+## Visao Geral
 
-The project now covers the full pipeline implemented in stages:
+O fluxo principal esta em `synthetic_tables/src/main.py` e roda de ponta a ponta:
 
-- stage 1: project skeleton and module structure
-- stage 2: synthetic base table generation plus CSV/XLSX export
-- stage 3: intermediate HTML, LaTeX, and Markdown representations with sampled styles
-- stage 4: PDF rendering, page-image extraction, and sample metadata
-- stage 5: final integration, validation, configuration, and usability pass
+1. Gera schemas sinteticos com tipos de coluna coerentes.
+2. Materializa linhas e valores a partir desses schemas.
+3. Exporta a tabela base para CSV e XLSX.
+4. Amostra um estilo deterministico por tabela, formato e versao visual.
+5. Renderiza fontes intermediarias em HTML, LaTeX e/ou Markdown.
+6. Converte cada fonte intermediaria para PDF.
+7. Rasteriza cada PDF em imagens PNG no(s) DPI(s) configurado(s).
+8. Registra metadados de tabelas em `tables.jsonl`.
+9. Registra metadados de amostras visuais em `samples.jsonl`.
 
-## Pipeline overview
+Formatos gerados:
 
-The pipeline runs end-to-end as follows:
+- `json`: schemas das tabelas base.
+- `csv`: tabela base simples.
+- `xlsx`: tabela base em planilha.
+- `html`: representacao intermediaria com templates Jinja.
+- `tex`: representacao intermediaria LaTeX com templates Jinja.
+- `md`: representacao intermediaria Markdown gerada programaticamente.
+- `pdf`: PDF final por formato intermediario.
+- `png`: imagens por pagina extraidas de cada PDF.
+- `jsonl`: metadados de tabelas e amostras.
 
-1. Generate a synthetic schema for each table.
-2. Generate coherent column values and assemble the base table in memory.
-3. Export the base table to CSV and XLSX.
-4. Generate styled intermediate representations in HTML, LaTeX, and Markdown.
-5. Render each intermediate representation to PDF.
-6. Convert each PDF into page images at one or more DPI values.
-7. Persist table-level metadata in `tables.jsonl`.
-8. Persist sample-level metadata in `samples.jsonl`.
+Renderers atuais:
 
-This makes the same structured table appear in multiple visual variants, formats, and rasterization levels, which is useful for downstream OCR and table extraction experiments.
+- `HTMLRenderer`: gera HTML a partir de templates.
+- `MarkdownRenderer`: gera Markdown programaticamente.
+- `LatexRenderer`: gera LaTeX a partir de templates.
+- `PDFRenderer`: converte HTML, Markdown e LaTeX para PDF.
+- `PDFToImageConverter`: converte PDF em imagens PNG.
 
-## Project structure
+## Estrutura Atual Do Projeto
 
 ```text
-synthetic_tables/
-  data/
-    base_tables/
-      csv/
-      xlsx/
-      schemas/
-    rendered/
-      html/
-      latex/
-      markdown/
-      pdf/
-      images/
-    metadata/
-      tables.jsonl
-      samples.jsonl
-  src/
-    config.py
-    main.py
-    generators/
-      schema_generator.py
-      column_generators.py
-      table_generator.py
-    exporters/
-      csv_exporter.py
-      xlsx_exporter.py
-      format_exporter.py
-    styles/
-      style_sampler.py
-      templates/
+.
+  README.md
+  requirements.txt
+  synthetic_tables/
+    data/
+      base_tables/
+        csv/
+        xlsx/
+        schemas/
+      rendered/
         html/
         latex/
-    renderers/
-      html_renderer.py
-      latex_renderer.py
-      markdown_renderer.py
-      pdf_renderer.py
-      pdf_to_image.py
-    metadata/
-      metadata_writer.py
-    utils/
-      io.py
-      ids.py
-      seed.py
-  requirements.txt
-  README.md
+        markdown/
+        pdf/
+        images/
+        diagnostics/
+      metadata/
+        tables.jsonl
+        samples.jsonl
+    src/
+      config.py
+      main.py
+      latex_smoke_test.py
+      generators/
+        schema_generator.py
+        column_generators.py
+        table_generator.py
+      exporters/
+        csv_exporter.py
+        xlsx_exporter.py
+        format_exporter.py
+      styles/
+        style_sampler.py
+        templates/
+          html/
+            simple_tabular.html.j2
+            default_table.html.j2
+            document_columns.html.j2
+            document_stream.html.j2
+            numeric_blocks.html.j2
+            hybrid_mosaic.html.j2
+            editorial_blocks.html.j2
+            procedure_form.html.j2
+          latex/
+            simple_tabular.tex.j2
+            default_table.tex.j2
+            executive_brief.tex.j2
+            editorial_report.tex.j2
+            data_memo.tex.j2
+            record_cards.tex.j2
+            split_matrix.tex.j2
+            _shared_*.tex.j2
+      renderers/
+        html_renderer.py
+        markdown_renderer.py
+        latex_renderer.py
+        pdf_renderer.py
+        pdf_to_image.py
+      metadata/
+        metadata_writer.py
+      utils/
+        ids.py
+        io.py
+        seed.py
 ```
 
-## Installation
+Onde fica cada responsabilidade:
 
-1. Create the virtual environment inside the project:
+- Geracao de tabelas: `synthetic_tables/src/generators/`.
+- Exportacao base e despacho por formato: `synthetic_tables/src/exporters/`.
+- Renderers de HTML, Markdown, LaTeX, PDF e imagens: `synthetic_tables/src/renderers/`.
+- Templates HTML e LaTeX: `synthetic_tables/src/styles/templates/`.
+- Amostragem de estilos e nomes de templates suportados: `synthetic_tables/src/styles/style_sampler.py`.
+- Metadata JSONL: `synthetic_tables/src/metadata/metadata_writer.py`.
+- Configuracao, paths e defaults: `synthetic_tables/src/config.py`.
+- Pipeline principal: `synthetic_tables/src/main.py`.
+- Diagnostico focado em LaTeX: `synthetic_tables/src/latex_smoke_test.py`.
 
-```bash
-python -m venv synthetic_tables/.venv
+## Mudancas Recentes De Organizacao E Implementacao
+
+O projeto foi reorganizado em torno de um pipeline unico, com responsabilidades mais separadas:
+
+- `main.py` passou a orquestrar geracao, exportacao, renderizacao, rasterizacao e metadata.
+- `config.py` centraliza paths e parametros padrao como contagem de tabelas, versoes visuais, ranges de linhas/colunas, DPIs e formatos de origem.
+- `FormatExporter` virou o ponto de despacho para CSV, XLSX, HTML, LaTeX e Markdown.
+- `style_sampler.py` passou a concentrar estilos, templates suportados e IDs de estilo.
+- HTML e LaTeX ficaram baseados em templates Jinja dentro de `styles/templates/`.
+- Markdown continua sem templates Jinja; a composicao do documento vive em `markdown_renderer.py`.
+- A conversao para PDF foi centralizada em `pdf_renderer.py`.
+- A rasterizacao de PDFs ficou isolada em `pdf_to_image.py`.
+
+Mudancas de layout/rendering:
+
+- Foi adicionado o template `simple_tabular` como layout simples padrao para HTML, LaTeX e Markdown.
+- O pipeline principal chama `StyleSampler.sample(...)` sem `layout_name`, entao a execucao padrao usa:
+  - `simple_tabular.html.j2` para HTML;
+  - `simple_tabular.tex.j2` para LaTeX;
+  - `simple_tabular` para Markdown.
+- Os templates alternativos continuam declarados em `TEMPLATE_NAMES_BY_FORMAT`, mas nao sao escolhidos aleatoriamente pelo `main.py` atual.
+- HTML, Markdown e LaTeX agora adicionam uma coluna sintetica `Record` com valores `Record NNN` para preservar rastreabilidade das linhas.
+- Tabelas largas passaram a ser divididas em blocos/matrizes com o mesmo `Record` repetido, em vez de tentar comprimir tudo em uma unica largura.
+- O rendering LaTeX normal ficou estrito: ele exige um motor TeX real e nao troca automaticamente para ReportLab/xhtml2pdf no pipeline principal.
+
+## Compatibilidade E Legado
+
+Codigo de compatibilidade ainda presente:
+
+- `synthetic_tables/src/renderers/pdf_renderer.py`
+  - HTML tenta `playwright-chromium`, depois `weasyprint-html`, depois `xhtml2pdf-html-fallback`.
+  - Markdown aceita o comentario legado `<!-- style: fonte/alinhamento/template -->`, alem do comentario atual `<!-- markdown-style: {...} -->`.
+  - LaTeX possui `_latex_compatibility_source(...)`, que gera uma fonte LaTeX conservadora de safe-preview quando a compilacao criativa falha mas a tabela canonica pode ser extraida.
+  - `_render_latex_without_tex_engine(...)` existe apenas para diagnosticos do smoke test; nao e fallback do pipeline normal.
+
+- `synthetic_tables/src/renderers/markdown_renderer.py`
+  - `_append_matrix_groups_legacy(...)` preserva a versao antiga do marcador de matriz com caractere especial. O fluxo atual usa `_append_matrix_groups(...)`, com separador ASCII `-`.
+
+- `synthetic_tables/src/styles/templates/latex/default_table.tex.j2`
+  - Template conservador de compatibilidade/debug para LaTeX.
+
+- `synthetic_tables/src/exporters/xlsx_exporter.py`
+  - `_export_with_zipfile(...)` permanece como fallback minimo caso `openpyxl` nao esteja disponivel.
+
+- `synthetic_tables/src/exporters/format_exporter.py`
+  - `export_render_bundle(...)` ainda existe como helper para exportar um pacote simples por formato. O pipeline atual usa caminhos versionados via `main.py`.
+
+- `synthetic_tables/src/latex_smoke_test.py`
+  - Gera um bundle de diagnostico em `synthetic_tables/data/rendered/diagnostics/<sample_stem>/`, incluindo logs, PDF nativo quando possivel, safe-preview e fallback forcado para comparacao.
+
+O fallback nao-TeX de LaTeX e historico/diagnostico. No pipeline normal, se nenhum `latexmk`, `pdflatex` ou `tectonic` for encontrado, a renderizacao LaTeX falha com erro explicito.
+
+## Regras Atuais De Renderizacao
+
+### HTML
+
+Regras principais em `synthetic_tables/src/renderers/html_renderer.py`:
+
+- Usa templates Jinja em `synthetic_tables/src/styles/templates/html/`.
+- O default do pipeline atual e `simple_tabular.html.j2`.
+- Adiciona uma coluna visivel `Record`.
+- Para o template simples, se houver mais de 5 colunas visiveis, divide a tabela em blocos `Block N`, mantendo `Record` em todos os blocos.
+- Para tabelas com 6 ou mais colunas reais, ignora o modo de largura simples e calcula larguras semanticas por tipo de conteudo.
+- Reduz escala de fonte em tabelas mais largas.
+- Ajusta largura da folha conforme o template e a quantidade de colunas.
+
+Conversao HTML -> PDF em `synthetic_tables/src/renderers/pdf_renderer.py`:
+
+1. `playwright` + Chromium, caminho preferencial.
+2. `weasyprint`, fallback de maior fidelidade.
+3. `xhtml2pdf`, fallback de emergencia com CSS simplificado.
+
+### Markdown
+
+Regras principais em `synthetic_tables/src/renderers/markdown_renderer.py`:
+
+- Markdown e montado programaticamente, sem templates Jinja.
+- O default do pipeline atual e `simple_tabular`.
+- O arquivo `.md` inclui no topo um comentario `markdown-style` em JSON com estilo e template.
+- A tabela simples adiciona `Record` e divide tabelas largas em blocos de ate 5 colunas visiveis.
+- Layouts alternativos suportados no codigo: `default_markdown`, `markdown_records`, `markdown_mixed` e `markdown_briefing`.
+- Para layouts alternativos, datasets largos e ricos em strings podem virar `Matrix A`/`Matrix B`, sempre com ancoragem por `Record`.
+
+Conversao Markdown -> PDF em `synthetic_tables/src/renderers/pdf_renderer.py`:
+
+- Usa a biblioteca `markdown` com extensoes `tables` e `fenced_code`.
+- Transforma Markdown em HTML tematico.
+- Mapeia templates Markdown para temas HTML: `ledger`, `dossier`, `signal` e `briefing`.
+- Renderiza o HTML resultante pelo mesmo caminho HTML -> PDF.
+
+### LaTeX
+
+Regras principais em `synthetic_tables/src/renderers/latex_renderer.py`:
+
+- Usa templates Jinja em `synthetic_tables/src/styles/templates/latex/`.
+- O default do pipeline atual e `simple_tabular.tex.j2`.
+- Adiciona `Record` como coluna de rastreabilidade.
+- Templates simples e safe-preview sao respeitados diretamente.
+- Templates criativos podem ser redirecionados para `split_matrix.tex.j2` quando a tabela e larga ou muito categorica.
+- O planner tenta layouts em ordem: `portrait`, `landscape`, `landscape-compact` e, se necessario, `split`.
+- Cada detalhe dividido repete a coluna `Record`.
+- Charts LaTeX aparecem nos templates criativos quando ha coluna numerica estavel e ate 75 linhas; os pontos sao divididos em paineis de ate 25 linhas.
+
+Conversao LaTeX -> PDF em `synthetic_tables/src/renderers/pdf_renderer.py`:
+
+- Procura motores nesta ordem: `latexmk`, `pdflatex`, `tectonic`.
+- Tambem verifica variaveis de ambiente:
+  - `SYNTHETIC_TABLES_LATEXMK` / `LATEXMK_PATH`
+  - `SYNTHETIC_TABLES_PDFLATEX` / `PDFLATEX_PATH`
+  - `SYNTHETIC_TABLES_TECTONIC` / `TECTONIC_PATH`
+- Tambem tenta locais comuns de MiKTeX, TeX Live e TinyTeX no Windows.
+- Compila primeiro a fonte criativa.
+- Se a compilacao criativa falhar e a tabela puder ser extraida, tenta uma fonte LaTeX safe-preview.
+- Se todas as tentativas TeX falharem, levanta erro; nao usa fallback nao-TeX no pipeline normal.
+
+## Como Rodar
+
+Os exemplos abaixo assumem PowerShell no Windows, a partir da raiz do repositorio.
+
+### Instalar Dependencias
+
+Crie e ative um ambiente virtual. A pasta `env/` na raiz e uma opcao simples:
+
+```powershell
+python -m venv env
+.\env\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m playwright install chromium
 ```
 
-2. Install the dependencies into that `venv`:
+Se voce mantiver outro nome de venv, ajuste o prefixo dos comandos.
 
-```bash
-synthetic_tables\.venv\Scripts\python.exe -m pip install -r synthetic_tables/requirements.txt
+LaTeX e necessario para a execucao padrao porque `source_formats` inclui `latex`. Instale MiKTeX, TeX Live ou Tectonic, ou rode sem LaTeX usando `--source-formats html markdown`.
+
+### Pipeline Completo
+
+Com o ambiente ativado:
+
+```powershell
+python synthetic_tables\src\main.py
 ```
 
-3. Install the Chromium runtime used by the default HTML -> PDF renderer:
+Sem ativar o ambiente:
 
-```bash
-synthetic_tables\.venv\Scripts\python.exe -m playwright install chromium
+```powershell
+env\Scripts\python.exe synthetic_tables\src\main.py
 ```
 
-4. If you plan to render LaTeX PDFs, install a real TeX engine. On Windows, MiKTeX is the recommended setup. Make sure `latexmk.exe` or `pdflatex.exe` is available on `PATH`, or point the project at the executable explicitly with:
+### Rodar Sem LaTeX
 
-- `SYNTHETIC_TABLES_LATEXMK`
-- `LATEXMK_PATH`
-- `SYNTHETIC_TABLES_PDFLATEX`
-- `PDFLATEX_PATH`
-- `SYNTHETIC_TABLES_TECTONIC`
-- `TECTONIC_PATH`
-
-5. Optional: verify the `venv` is the one being used:
-
-```bash
-synthetic_tables\.venv\Scripts\python.exe -m pip list
+```powershell
+python synthetic_tables\src\main.py --source-formats html markdown
 ```
 
-## How To Run
+### Parametros Comuns
 
-Run the complete pipeline with defaults:
-
-```bash
-synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py
+```powershell
+python synthetic_tables\src\main.py --table-count 6
+python synthetic_tables\src\main.py --visual-versions 3
+python synthetic_tables\src\main.py --seed 123
+python synthetic_tables\src\main.py --min-rows 50 --max-rows 120
+python synthetic_tables\src\main.py --min-cols 4 --max-cols 14
+python synthetic_tables\src\main.py --dpis 100 200 300
+python synthetic_tables\src\main.py --source-formats html latex markdown
 ```
 
-Run the focused LaTeX smoke test against one representative generated sample:
+Exemplo completo:
 
-```bash
-synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/latex_smoke_test.py
-```
-
-If TexViewer is using a TeX install that is not on `PATH`, point the smoke test at that exact executable:
-
-```bash
-$env:SYNTHETIC_TABLES_LATEXMK = "C:\Path\To\latexmk.exe"
-synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/latex_smoke_test.py ^
-  --source synthetic_tables/data/rendered/latex/base_table_003__v02.tex
-```
-
-The smoke test writes a diagnostic bundle under `data/rendered/diagnostics/<sample_stem>/` containing:
-
-- a copy of the generated `.tex`
-- the native TeX-compiled PDF if available
-- a safe-preview PDF if the creative source fails but the engine still compiles the compatibility source
-- the forced fallback PDF used only for diagnostics-side comparison
-- TeX log files for each attempt
-- a JSON report summarizing engine discovery and likely failure causes
-
-The forced fallback PDF is diagnostic-only. The normal LaTeX rendering path now requires a real TeX engine and does not use non-TeX PDF fallback rendering.
-
-The default run generates:
-
-- base schemas in `data/base_tables/schemas/`
-- base CSV files in `data/base_tables/csv/`
-- base XLSX files in `data/base_tables/xlsx/`
-- styled HTML files in `data/rendered/html/`
-- styled LaTeX files in `data/rendered/latex/`
-- styled Markdown files in `data/rendered/markdown/`
-- PDFs in `data/rendered/pdf/`
-- page images in `data/rendered/images/`
-- table metadata in `data/metadata/tables.jsonl`
-- sample metadata in `data/metadata/samples.jsonl`
-
-## Configuration
-
-The pipeline is configurable from the command line.
-
-### Number of base tables
-
-```bash
-synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py --table-count 6
-```
-
-### Number of visual versions
-
-This controls how many distinct style variants are generated per source format.
-
-```bash
-synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py --visual-versions 3
-```
-
-### Seed
-
-```bash
-synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py --seed 123
-```
-
-### Range of rows
-
-```bash
-synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py --min-rows 50 --max-rows 120
-```
-
-### Range of columns
-
-```bash
-synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py --min-cols 4 --max-cols 14
-```
-
-### DPIs
-
-The defaults are `100` and `300`, but you can pass any positive DPI values.
-
-```bash
-synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py --dpis 100 200 300
-```
-
-### Source formats
-
-```bash
-synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py --source-formats html markdown
-```
-
-## LaTeX Prerequisites
-
-LaTeX PDF rendering requires a real TeX engine. The renderer searches in this order:
-
-1. `latexmk -pdf`
-2. `pdflatex`
-3. `tectonic`
-
-If those executables are not available on `PATH`, the PDF renderer also looks at:
-
-- `SYNTHETIC_TABLES_LATEXMK`
-- `LATEXMK_PATH`
-- `SYNTHETIC_TABLES_PDFLATEX`
-- `PDFLATEX_PATH`
-- `SYNTHETIC_TABLES_TECTONIC`
-- `TECTONIC_PATH`
-
-On Windows, installing MiKTeX is the most practical option. After installation, ensure `latexmk.exe` or `pdflatex.exe` is reachable on `PATH`, or set one of the environment variables above to the full executable path.
-
-This is intentional behavior: if no supported TeX engine is found, LaTeX rendering fails immediately with a clear dependency error. It does not fall back to `reportlab`, `xhtml2pdf`, or any other non-TeX PDF renderer for the normal LaTeX pipeline.
-
-If a TeX engine is present but both the creative compile and the TeX-backed safe-preview compile fail, the LaTeX render still fails instead of switching to a non-TeX renderer.
-
-### Troubleshooting: No TeX Engine Found
-
-If you request LaTeX rendering without `latexmk`, `pdflatex`, or `tectonic`, the run fails with an explicit `latex_engine_required` error. The message tells you that a real TeX engine is required, lists the executables that were searched, and reminds you about the supported environment variables for explicit paths.
-
-For Windows users, the quickest fix is usually:
-
-1. Install MiKTeX.
-2. Confirm that `latexmk.exe` or `pdflatex.exe` is available.
-3. If it is not on `PATH`, set `SYNTHETIC_TABLES_LATEXMK` or `SYNTHETIC_TABLES_PDFLATEX` to the full executable path before running the pipeline.
-
-### Full example
-
-```bash
-synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py ^
-  --table-count 5 ^
-  --visual-versions 2 ^
-  --seed 77 ^
-  --min-rows 40 ^
-  --max-rows 90 ^
-  --min-cols 5 ^
-  --max-cols 10 ^
-  --dpis 100 300 ^
+```powershell
+python synthetic_tables\src\main.py `
+  --table-count 5 `
+  --visual-versions 2 `
+  --seed 77 `
+  --min-rows 40 `
+  --max-rows 90 `
+  --min-cols 5 `
+  --max-cols 10 `
+  --dpis 100 300 `
   --source-formats html latex markdown
 ```
 
-## Supported Data And Rendering Features
+### Smoke Test De LaTeX
 
-### Base column types
+Depois de gerar ao menos uma fonte `.tex`:
+
+```powershell
+python synthetic_tables\src\latex_smoke_test.py --source synthetic_tables\data\rendered\latex\base_table_003__v02.tex
+```
+
+Se o executavel TeX nao estiver no `PATH`, informe o caminho por variavel de ambiente:
+
+```powershell
+$env:SYNTHETIC_TABLES_PDFLATEX = "C:\Path\To\pdflatex.exe"
+python synthetic_tables\src\latex_smoke_test.py --source synthetic_tables\data\rendered\latex\base_table_003__v02.tex
+```
+
+Ou por argumento do smoke test:
+
+```powershell
+python synthetic_tables\src\latex_smoke_test.py --pdflatex-path "C:\Path\To\pdflatex.exe" --source synthetic_tables\data\rendered\latex\base_table_003__v02.tex
+```
+
+## Saidas Geradas
+
+A execucao padrao grava:
+
+- schemas em `synthetic_tables/data/base_tables/schemas/`
+- CSVs em `synthetic_tables/data/base_tables/csv/`
+- XLSX em `synthetic_tables/data/base_tables/xlsx/`
+- HTML em `synthetic_tables/data/rendered/html/`
+- LaTeX em `synthetic_tables/data/rendered/latex/`
+- Markdown em `synthetic_tables/data/rendered/markdown/`
+- PDFs em `synthetic_tables/data/rendered/pdf/`
+- imagens PNG em `synthetic_tables/data/rendered/images/<sample_id>/`
+- metadata de tabelas em `synthetic_tables/data/metadata/tables.jsonl`
+- metadata de amostras em `synthetic_tables/data/metadata/samples.jsonl`
+
+## Configuracao Padrao
+
+Os defaults vivem em `synthetic_tables/src/config.py`:
+
+- `table_count = 4`
+- `visual_versions = 2`
+- `seed = 42`
+- `min_rows = 40`
+- `max_rows = 100`
+- `min_cols = 5`
+- `max_cols = 12`
+- `dpis = (100, 300)`
+- `source_formats = ("html", "latex", "markdown")`
+
+Formatos aceitos por `--source-formats`:
+
+- `html`
+- `latex`
+- `markdown`
+
+## Tipos De Dados Sinteticos
+
+Os tipos de coluna suportados vivem em `synthetic_tables/src/generators/schema_generator.py`:
 
 - `text_short`
 - `text_long`
@@ -273,90 +371,42 @@ synthetic_tables\.venv\Scripts\python.exe synthetic_tables/src/main.py ^
 - `alphanumeric_code`
 - `symbolic_mixed`
 
-### Style variations
+## Dependencias
 
-- `font_family`
-- `font_size_pt`
-- `line_height`
-- `border_style`
-- `alignment_profile`
-- `column_width_mode`
-- `zebra_striping`
-- `header_emphasis`
-- `padding`
+`requirements.txt` fica na raiz do repositorio e lista as dependencias diretas:
 
-### Rendering stack
+- `openpyxl`: exportacao XLSX.
+- `Jinja2`: templates HTML e LaTeX.
+- `markdown`: conversao Markdown -> HTML.
+- `playwright`: renderizacao HTML -> PDF via Chromium.
+- `weasyprint`: fallback HTML -> PDF.
+- `reportlab`: renderizacao interna de previews/fallbacks diagnosticos.
+- `xhtml2pdf`: fallback HTML de emergencia e preview diagnostico.
+- `pypdfium2`: contagem/rasterizacao de PDFs.
+- `Pillow`: suporte de imagem.
 
-- HTML -> PDF via `playwright` + Chromium
-- HTML fallback -> PDF via `weasyprint`
-- HTML emergency fallback -> PDF via `xhtml2pdf`
-- Markdown -> HTML -> PDF via `markdown` + internal `reportlab` table rendering
-- PDF -> image via `pypdfium2`
-- LaTeX creative mode -> PDF via local LaTeX engines with `latexmk -pdf` preferred, then `pdflatex`, then `tectonic`
-- LaTeX safe-preview compatibility mode -> conservative standalone LaTeX compiled by the same TeX engine after a creative compile failure when the canonical table can be extracted
-- LaTeX diagnostic fallback preview -> PDF via `reportlab` or `xhtml2pdf` only inside `latex_smoke_test.py` comparison bundles, not in the normal LaTeX render path
+Notas:
 
-## Requirements Notes
+- Playwright requer `python -m playwright install chromium`.
+- WeasyPrint pode exigir bibliotecas nativas dependendo do sistema.
+- O pipeline LaTeX normal exige `latexmk`, `pdflatex` ou `tectonic`.
 
-`requirements.txt` reflects the direct dependencies used by the project code:
+## Limitacoes Atuais
 
-- `openpyxl` for XLSX export
-- `Jinja2` for HTML and LaTeX templates
-- `markdown` for Markdown-to-HTML conversion
-- `playwright` for the default high-fidelity HTML-to-PDF path
-- `weasyprint` for the higher-fidelity HTML fallback path
-- `reportlab` for Markdown PDF rendering and LaTeX diagnostic fallback PDFs
-- `xhtml2pdf` for emergency HTML fallback rendering and LaTeX diagnostic source-preview PDFs
-- `pypdfium2` for PDF rasterization
-- `Pillow` for image output support
+- Ainda nao gera anotacoes OCR, bounding boxes ou segmentacao geometrica.
+- Cada documento renderizado e centrado em uma tabela base.
+- Layouts alternativos existem no codigo, mas o CLI atual nao expoe selecao de `layout_name`.
+- O default inclui LaTeX; sem motor TeX instalado, use `--source-formats html markdown`.
+- A metadata descreve artefatos e parametros, nao supervisao por celula.
+- Degradacoes visuais como blur, skew, sombra, ruido e compressao ainda nao sao modeladas.
 
-Browser/runtime notes:
+## Resumo End-To-End
 
-- Playwright needs a browser install step such as `python -m playwright install chromium`
-- WeasyPrint may also require native text/layout libraries on some systems; if those are missing, the renderer falls through to the next supported fallback
-- `xhtml2pdf` is intentionally still installed because the HTML renderer keeps it as the emergency fallback, and the LaTeX smoke-test diagnostics can still emit a forced source-preview PDF with it
-- LaTeX PDF rendering depends on an external TeX engine being available; the pipeline looks for `latexmk`, `pdflatex`, or `tectonic` on `PATH`, through env vars like `SYNTHETIC_TABLES_LATEXMK` / `LATEXMK_PATH`, `SYNTHETIC_TABLES_PDFLATEX` / `PDFLATEX_PATH`, and `SYNTHETIC_TABLES_TECTONIC` / `TECTONIC_PATH`, plus common MiKTeX / TeX Live / TinyTeX locations on Windows
-- The LaTeX backend now has two intentional modes:
-  - creative templates for richer layouts and charts
-  - `default_table.tex.j2` as the conservative compatibility/debug layout
-- During PDF rendering, the LaTeX branch tries a creative compile first and then a safe-preview compile before failing the LaTeX render
+Ao final de uma execucao bem sucedida, o projeto tera:
 
-## Limitations
-
-Current limitations of the project:
-
-- the pipeline generates synthetic tables, but not OCR annotations yet
-- LaTeX creative mode still depends on the local engine supporting packages like `pgfplots` and `tcolorbox`; stricter installations may fall back to the safe-preview mode
-- If no local LaTeX engine is installed, LaTeX rendering now fails intentionally with a clear dependency error instead of using a non-TeX PDF fallback
-- HTML keeps its approved layout on the default Playwright path, but fallback renderers may still simplify layout if browser-grade rendering is unavailable
-- page layouts are still table-centric, with one table per rendered document
-- visual noise and document degradation are not yet modeled
-- metadata focuses on file artifacts and generation settings, not geometric supervision
-
-## Future Extensions For OCR And Table Extraction
-
-Natural next extensions for OCR and table extraction include:
-
-- table bounding box on the page
-- bounding boxes for every cell
-- per-token or per-line OCR text annotations
-- visual noise injection
-- blur simulation
-- light rotation and skew
-- scanning artifacts such as shadows, compression noise, and uneven illumination
-- multiple tables on the same page
-- borderless tables
-- partially bordered tables
-- richer pagination controls
-- merged cells, nested headers, and footnotes
-
-## End-to-End Summary
-
-At the end of a successful run, the pipeline has:
-
-- generated base structured tables
-- exported CSV and XLSX versions
-- produced multiple styled HTML, LaTeX, and Markdown variants
-- rendered those variants into PDFs
-- rasterized PDFs into page images at the requested DPI values
-- written `tables.jsonl` and `samples.jsonl` so downstream tasks can consume the dataset programmatically
+- criado tabelas base sinteticas;
+- salvo schemas, CSVs e XLSX;
+- gerado fontes HTML, LaTeX e/ou Markdown;
+- renderizado PDFs;
+- rasterizado paginas em PNG;
+- escrito `tables.jsonl` e `samples.jsonl` para consumo programatico.

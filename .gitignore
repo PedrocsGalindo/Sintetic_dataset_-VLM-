@@ -3,3 +3,4 @@
 synthetic_tables/data
 data/
 env/
+__pycache__/

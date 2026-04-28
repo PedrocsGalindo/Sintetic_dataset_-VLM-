@@ -476,6 +476,16 @@ class PDFRenderer:
             "img, svg, canvas, table {"
             "max-width: 100% !important;"
             "}"
+            "table {"
+            "width: 100% !important;"
+            "table-layout: fixed !important;"
+            "}"
+            "th, td {"
+            "min-width: 0 !important;"
+            "overflow-wrap: break-word !important;"
+            "word-break: normal !important;"
+            "hyphens: auto !important;"
+            "}"
             "}"
         )
 
@@ -689,10 +699,13 @@ class PDFRenderer:
         def register(engine_name: str, candidate_path: str | Path | None) -> None:
             if not candidate_path:
                 return
-            resolved = str(Path(candidate_path).expanduser())
-            if not Path(resolved).exists():
+            candidate = Path(candidate_path).expanduser()
+            try:
+                if not candidate.exists():
+                    return
+                normalized = str(candidate.resolve())
+            except OSError:
                 return
-            normalized = str(Path(resolved).resolve())
             if normalized in seen_paths:
                 return
             seen_paths.add(normalized)

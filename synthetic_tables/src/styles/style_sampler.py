@@ -7,6 +7,40 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SUPPORTED_STYLE_FORMATS: tuple[str, ...] = ("html", "latex", "markdown")
+SIMPLE_LAYOUT_NAME = "simple_tabular"
+DEFAULT_TEMPLATE_BY_FORMAT: dict[str, str] = {
+    "html": "simple_tabular.html.j2",
+    "latex": "simple_tabular.tex.j2",
+    "markdown": SIMPLE_LAYOUT_NAME,
+}
+TEMPLATE_NAMES_BY_FORMAT: dict[str, tuple[str, ...]] = {
+    "html": (
+        "simple_tabular.html.j2",
+        "default_table.html.j2",
+        "document_columns.html.j2",
+        "document_stream.html.j2",
+        "numeric_blocks.html.j2",
+        "hybrid_mosaic.html.j2",
+        "editorial_blocks.html.j2",
+        "procedure_form.html.j2",
+    ),
+    "latex": (
+        "simple_tabular.tex.j2",
+        "executive_brief.tex.j2",
+        "editorial_report.tex.j2",
+        "data_memo.tex.j2",
+        "record_cards.tex.j2",
+        "split_matrix.tex.j2",
+        "default_table.tex.j2",
+    ),
+    "markdown": (
+        SIMPLE_LAYOUT_NAME,
+        "default_markdown",
+        "markdown_records",
+        "markdown_mixed",
+        "markdown_briefing",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -37,7 +71,12 @@ class StyleSampler:
     def __init__(self, base_seed: int = 42) -> None:
         self.base_seed = base_seed
 
-    def sample(self, output_format: str, table_id: str | None = None) -> TableStyle:
+    def sample(
+        self,
+        output_format: str,
+        table_id: str | None = None,
+        layout_name: str | None = None,
+    ) -> TableStyle:
         """Sample a style for the requested output format."""
 
         normalized_format = output_format.lower()
@@ -76,32 +115,8 @@ class StyleSampler:
         )
         palette = rng.choice(palettes)
 
-        template_names = {
-            "html": (
-                "default_table.html.j2",
-                "document_columns.html.j2",
-                "document_stream.html.j2",
-                "numeric_blocks.html.j2",
-                "hybrid_mosaic.html.j2",
-                "editorial_blocks.html.j2",
-                "procedure_form.html.j2",
-            ),
-            "latex": (
-                "executive_brief.tex.j2",
-                "editorial_report.tex.j2",
-                "data_memo.tex.j2",
-                "record_cards.tex.j2",
-            ),
-            "markdown": (
-                "default_markdown",
-                "markdown_records",
-                "markdown_mixed",
-                "markdown_briefing",
-            ),
-        }
-
         return TableStyle(
-            template_name=rng.choice(template_names.get(normalized_format, ("default_table.html.j2",))),
+            template_name=self._resolve_template_name(normalized_format, layout_name),
             font_family=rng.choice(font_choices.get(normalized_format, ("Helvetica",))),
             font_size_pt=rng.randint(9, 13),
             line_height=round(rng.uniform(1.1, 1.6), 2),
@@ -118,6 +133,21 @@ class StyleSampler:
             accent_color=palette["accent_color"],
             table_width=rng.choice(("88%", "92%", "100%")),
         )
+
+    def _resolve_template_name(self, output_format: str, layout_name: str | None) -> str:
+        """Resolve a requested layout name or fall back to the default simple layout."""
+
+        if layout_name is None:
+            return DEFAULT_TEMPLATE_BY_FORMAT[output_format]
+
+        if layout_name == SIMPLE_LAYOUT_NAME:
+            return DEFAULT_TEMPLATE_BY_FORMAT[output_format]
+
+        supported_templates = TEMPLATE_NAMES_BY_FORMAT[output_format]
+        if layout_name in supported_templates:
+            return layout_name
+
+        raise ValueError(f"Unsupported layout '{layout_name}' for format '{output_format}'.")
 
 
 def build_style_id(source_format: str, style: TableStyle) -> str:
