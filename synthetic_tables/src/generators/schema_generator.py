@@ -174,6 +174,10 @@ class SchemaGenerator:
                 column_count=column_count,
                 forced_dtypes=forced_dtypes,
             )
+            if table_index == 0:
+                for column in schema.columns:
+                    if column.dtype in {"text_short", "text_long"}:
+                        column.metadata["max_length"] = 40
             schemas.append(schema)
 
         return schemas

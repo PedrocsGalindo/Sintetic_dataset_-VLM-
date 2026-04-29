@@ -10,6 +10,8 @@ from typing import Any
 
 from generators.schema_generator import ColumnSchema
 
+TEXT_MAX_LENGTH = 40
+
 SHORT_WORDS: tuple[str, ...] = (
     "north",
     "delta",
@@ -90,8 +92,8 @@ class TextShortColumnGenerator(BaseColumnGenerator):
         words = [self.rng.choice(SHORT_WORDS) for _ in range(n_words)]
         value = " ".join(words)
         if column.metadata.get("title_case", False):
-            return value.title()
-        return value
+            return _truncate_text(value.title(), column.metadata.get("max_length"))
+        return _truncate_text(value, column.metadata.get("max_length"))
 
 
 class TextLongColumnGenerator(BaseColumnGenerator):
@@ -106,7 +108,21 @@ class TextLongColumnGenerator(BaseColumnGenerator):
         n_words = self.rng.randint(min_words, max_words)
         tokens = [self.rng.choice(LONG_WORDS if idx % 2 else SHORT_WORDS) for idx in range(n_words)]
         sentence = " ".join(tokens)
-        return sentence[:1].upper() + sentence[1:]
+        return _truncate_text(sentence[:1].upper() + sentence[1:], column.metadata.get("max_length"))
+
+
+def _truncate_text(value: str, max_length: Any) -> str:
+    """Truncate text values when a column-level max length is configured."""
+
+    if max_length is None:
+        return value
+
+    limit = max(int(max_length), 0)
+    if len(value) <= limit:
+        return value
+    if limit <= 3:
+        return "." * limit
+    return f"{value[:limit - 3]}..."
 
 
 class IntegerColumnGenerator(BaseColumnGenerator):
