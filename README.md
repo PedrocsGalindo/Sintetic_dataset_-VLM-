@@ -250,8 +250,8 @@ python -m playwright install chromium
 ```
 
 Se voce mantiver outro nome de venv, ajuste o prefixo dos comandos.
-
-LaTeX e necessario para a execucao padrao porque `source_formats` inclui `latex`. Instale MiKTeX, TeX Live ou Tectonic, ou rode sem LaTeX usando `--source-formats html markdown`.
+#### Dependencia de Renderizacao 
+LaTeX e necessario para a execucao padrao porque `source_formats` inclui `latex`. Instale **MiKTeX**, TeX Live ou Tectonic, ou rode sem LaTeX usando `--source-formats html markdown`.
 
 ### Pipeline Completo
 
@@ -298,27 +298,6 @@ python synthetic_tables\src\main.py `
   --max-cols 10 `
   --dpis 100 300 `
   --source-formats html latex markdown
-```
-
-### Smoke Test De LaTeX
-
-Depois de gerar ao menos uma fonte `.tex`:
-
-```powershell
-python synthetic_tables\src\latex_smoke_test.py --source synthetic_tables\data\rendered\latex\base_table_003__v02.tex
-```
-
-Se o executavel TeX nao estiver no `PATH`, informe o caminho por variavel de ambiente:
-
-```powershell
-$env:SYNTHETIC_TABLES_PDFLATEX = "C:\Path\To\pdflatex.exe"
-python synthetic_tables\src\latex_smoke_test.py --source synthetic_tables\data\rendered\latex\base_table_003__v02.tex
-```
-
-Ou por argumento do smoke test:
-
-```powershell
-python synthetic_tables\src\latex_smoke_test.py --pdflatex-path "C:\Path\To\pdflatex.exe" --source synthetic_tables\data\rendered\latex\base_table_003__v02.tex
 ```
 
 ## Saidas Geradas
