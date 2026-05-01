@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from pathlib import Path
+import random
 
 from config import PipelineConfig, build_default_config
 from exporters.format_exporter import FormatExporter
@@ -122,34 +123,34 @@ def generate_visual_samples(config: PipelineConfig) -> None:
                     f"({pdf_result.pages} page(s), renderer={pdf_result.renderer})"
                 )
 
-                for dpi in settings.dpis:
-                    sample_counter += 1
-                    sample_id = make_sample_id(table.table_id, sample_counter)
-                    image_output_dir = config.paths.rendered_images_dir / sample_id
-                    image_result = pdf_to_image_converter.convert(
-                        pdf_path=pdf_result.pdf_path,
-                        output_dir=image_output_dir,
-                        dpi=dpi,
-                    )
-                    metadata_writer.write_sample_metadata(
-                        sample_id=sample_id,
-                        table_id=table.table_id,
-                        visual_version=version_label,
-                        source_format=source_format,
-                        renderer=pdf_result.renderer,
-                        style_id=style_id,
-                        font_family=style.font_family,
-                        font_size_pt=style.font_size_pt,
-                        dpi=dpi,
-                        pages=image_result.pages,
-                        page_image_paths=image_result.page_image_paths,
-                        pdf_path=pdf_result.pdf_path,
-                        csv_path=csv_path,
-                        xlsx_path=xlsx_path,
-                        n_rows=table.n_rows,
-                        n_cols=table.n_cols,
-                    )
-                    sample_breakdown[f"{source_format}@{dpi}dpi"] += 1
+                dpi = random.randint(100, 300)
+                sample_counter += 1
+                sample_id = make_sample_id(table.table_id, sample_counter)
+                image_output_dir = config.paths.rendered_images_dir / sample_id
+                image_result = pdf_to_image_converter.convert(
+                    pdf_path=pdf_result.pdf_path,
+                    output_dir=image_output_dir,
+                    dpi=dpi,
+                )
+                metadata_writer.write_sample_metadata(
+                    sample_id=sample_id,
+                    table_id=table.table_id,
+                    visual_version=version_label,
+                    source_format=source_format,
+                    renderer=pdf_result.renderer,
+                    style_id=style_id,
+                    font_family=style.font_family,
+                    font_size_pt=style.font_size_pt,
+                    dpi=dpi,
+                    pages=image_result.pages,
+                    page_image_paths=image_result.page_image_paths,
+                    pdf_path=pdf_result.pdf_path,
+                    csv_path=csv_path,
+                    xlsx_path=xlsx_path,
+                    n_rows=table.n_rows,
+                    n_cols=table.n_cols,
+                )
+                sample_breakdown[f"{source_format}@{dpi}dpi"] += 1
 
     print("")
     print("Pipeline concluido com sucesso.")
