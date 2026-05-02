@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Validation 12 Column Table - simple tabular</title>
+  <style>
+    :root {
+      --page-bg: #FCFFFD;
+      --text-color: #20313B;
+      --accent-color: #276749;
+      --border-color: #4A6B5A;
+      --header-bg: #D8F3E5;
+      --font-family: Tahoma;
+      --font-size: 11pt;
+      --line-height: 1.54;
+      --padding: 7px;
+      --sheet-width: min(1500px, 98vw);
+      --table-font-scale: 0.68;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 10px 12px;
+      background: linear-gradient(180deg, #f5f8fb 0%, var(--page-bg) 100%);
+      color: var(--text-color);
+      font-family: var(--font-family), serif;
+      font-size: var(--font-size);
+      line-height: var(--line-height);
+    }
+
+    .sheet {
+      width: var(--sheet-width);
+      margin: 0;
+      padding: 12px;
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+      max-width: 100%;
+      overflow: hidden;
+    }
+
+    .masthead {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .title {
+      margin: 0 0 8px 0;
+      color: var(--accent-color);
+      font-size: calc(var(--font-size) * 1.2);
+    }
+
+    .subtitle {
+      margin: 0;
+      opacity: 0.8;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(96px, 1fr));
+      gap: 8px;
+      min-width: 220px;
+    }
+
+    .stat {
+      padding: 7px 9px;
+      border: 1px solid rgba(92, 107, 122, 0.22);
+      background: rgba(248, 250, 252, 0.92);
+    }
+
+    .stat-label {
+      display: block;
+      font-size: 0.72em;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      opacity: 0.72;
+    }
+
+    .stat-value {
+      display: block;
+      margin-top: 3px;
+      font-weight: 700;
+    }
+
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
+    }
+
+    .table-block + .table-block {
+      margin-top: 12px;
+    }
+
+    .block-title {
+      margin: 0 0 8px 0;
+      font-size: calc(var(--font-size) * 0.95);
+      color: var(--accent-color);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: calc(var(--font-size) * var(--table-font-scale));
+    }
+
+    thead th {
+      background: var(--header-bg);
+      border: 1px solid var(--border-color);
+      padding: calc(var(--padding) * 0.55) calc(var(--padding) * 0.65);
+      text-align: left;
+      vertical-align: bottom;
+      overflow-wrap: break-word;
+      word-break: normal;
+      font-variant: small-caps; font-weight: 700;
+    }
+
+    tbody td {
+      border: 1px solid var(--border-color);
+      padding: calc(var(--padding) * 0.55) calc(var(--padding) * 0.65);
+      vertical-align: top;
+      min-width: 0;
+      overflow-wrap: break-word;
+      word-break: normal;
+      hyphens: auto;
+    }
+
+    .kind-long_text {
+      overflow-wrap: break-word;
+    }
+
+    .kind-compact,
+    .kind-numeric {
+      overflow-wrap: anywhere;
+    }
+
+
+    .col-0 {
+      text-align: center;
+      width: 7.50%;
+    }
+    .col-1 {
+      text-align: center;
+      width: 6.36%;
+    }
+    .col-2 {
+      text-align: center;
+      width: 6.35%;
+    }
+    .col-3 {
+      text-align: center;
+      width: 6.36%;
+    }
+    .col-4 {
+      text-align: center;
+      width: 7.73%;
+    }
+    .col-5 {
+      text-align: center;
+      width: 9.84%;
+    }
+    .col-6 {
+      text-align: center;
+      width: 9.81%;
+    }
+    .col-7 {
+      text-align: center;
+      width: 7.72%;
+    }
+    .col-8 {
+      text-align: center;
+      width: 6.18%;
+    }
+    .col-9 {
+      text-align: center;
+      width: 16.20%;
+    }
+    .col-10 {
+      text-align: center;
+      width: 6.11%;
+    }
+    .col-11 {
+      text-align: center;
+      width: 9.83%;
+    }
+  </style>
+</head>
+<body>
+  <section class="sheet">
+    <header class="masthead">
+      <div>
+        <h1 class="title">Validation 12 Column Table</h1>
+        <p class="subtitle">Simple tabular view of the generated dataset.</p>
+      </div>
+      <div class="stats">
+        <div class="stat">
+          <span class="stat-label">Rows</span>
+          <span class="stat-value">3</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Columns</span>
+          <span class="stat-value">12</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Long Text Fields</span>
+          <span class="stat-value">1</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Compact Fields</span>
+          <span class="stat-value">8</span>
+        </div>
+      </div>
+    </header>
+    <section class="table-block">
+    <div class="table-scroll">
+      <table aria-label="validation_12_column_table">
+        <thead>
+          <tr>
+            <th class="col-0 kind-compact" style="text-align: center; width: 7.50%;">Record Id</th>
+            <th class="col-1 kind-numeric" style="text-align: center; width: 6.36%;">Quantity</th>
+            <th class="col-2 kind-numeric" style="text-align: center; width: 6.35%;">Amount</th>
+            <th class="col-3 kind-numeric" style="text-align: center; width: 6.36%;">Coverage</th>
+            <th class="col-4 kind-compact" style="text-align: center; width: 7.73%;">Event Date</th>
+            <th class="col-5 kind-text" style="text-align: center; width: 9.84%;">Status</th>
+            <th class="col-6 kind-text" style="text-align: center; width: 9.81%;">Region</th>
+            <th class="col-7 kind-compact" style="text-align: center; width: 7.72%;">Product Code</th>
+            <th class="col-8 kind-numeric" style="text-align: center; width: 6.18%;">Split</th>
+            <th class="col-9 kind-long_text" style="text-align: center; width: 16.20%;">Notes</th>
+            <th class="col-10 kind-numeric" style="text-align: center; width: 6.11%;">Score</th>
+            <th class="col-11 kind-text" style="text-align: center; width: 9.83%;">Category</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="col-0 kind-compact" style="text-align: center; width: 7.50%;">R-001</td>
+            <td class="col-1 kind-numeric" style="text-align: center; width: 6.36%;">101</td>
+            <td class="col-2 kind-numeric" style="text-align: center; width: 6.35%;">1235.56</td>
+            <td class="col-3 kind-numeric" style="text-align: center; width: 6.36%;">88%</td>
+            <td class="col-4 kind-compact" style="text-align: center; width: 7.73%;">2026-05-01</td>
+            <td class="col-5 kind-text" style="text-align: center; width: 9.84%;">Active</td>
+            <td class="col-6 kind-text" style="text-align: center; width: 9.81%;">North</td>
+            <td class="col-7 kind-compact" style="text-align: center; width: 7.72%;">AX-1Q</td>
+            <td class="col-8 kind-numeric" style="text-align: center; width: 6.18%;">1/12</td>
+            <td class="col-9 kind-long_text" style="text-align: center; width: 16.20%;">Compact validation note with moderate text length.</td>
+            <td class="col-10 kind-numeric" style="text-align: center; width: 6.11%;">81</td>
+            <td class="col-11 kind-text" style="text-align: center; width: 9.83%;">A</td>
+          </tr>
+          <tr>
+            <td class="col-0 kind-compact" style="text-align: center; width: 7.50%;">R-002</td>
+            <td class="col-1 kind-numeric" style="text-align: center; width: 6.36%;">102</td>
+            <td class="col-2 kind-numeric" style="text-align: center; width: 6.35%;">1236.56</td>
+            <td class="col-3 kind-numeric" style="text-align: center; width: 6.36%;">89%</td>
+            <td class="col-4 kind-compact" style="text-align: center; width: 7.73%;">2026-05-02</td>
+            <td class="col-5 kind-text" style="text-align: center; width: 9.84%;">Active</td>
+            <td class="col-6 kind-text" style="text-align: center; width: 9.81%;">North</td>
+            <td class="col-7 kind-compact" style="text-align: center; width: 7.72%;">AX-2Q</td>
+            <td class="col-8 kind-numeric" style="text-align: center; width: 6.18%;">2/12</td>
+            <td class="col-9 kind-long_text" style="text-align: center; width: 16.20%;">Compact validation note with moderate text length.</td>
+            <td class="col-10 kind-numeric" style="text-align: center; width: 6.11%;">82</td>
+            <td class="col-11 kind-text" style="text-align: center; width: 9.83%;">A</td>
+          </tr>
+          <tr>
+            <td class="col-0 kind-compact" style="text-align: center; width: 7.50%;">R-003</td>
+            <td class="col-1 kind-numeric" style="text-align: center; width: 6.36%;">103</td>
+            <td class="col-2 kind-numeric" style="text-align: center; width: 6.35%;">1237.56</td>
+            <td class="col-3 kind-numeric" style="text-align: center; width: 6.36%;">90%</td>
+            <td class="col-4 kind-compact" style="text-align: center; width: 7.73%;">2026-05-03</td>
+            <td class="col-5 kind-text" style="text-align: center; width: 9.84%;">Active</td>
+            <td class="col-6 kind-text" style="text-align: center; width: 9.81%;">North</td>
+            <td class="col-7 kind-compact" style="text-align: center; width: 7.72%;">AX-3Q</td>
+            <td class="col-8 kind-numeric" style="text-align: center; width: 6.18%;">3/12</td>
+            <td class="col-9 kind-long_text" style="text-align: center; width: 16.20%;">Compact validation note with moderate text length.</td>
+            <td class="col-10 kind-numeric" style="text-align: center; width: 6.11%;">83</td>
+            <td class="col-11 kind-text" style="text-align: center; width: 9.83%;">A</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    </section>
+  </section>
+</body>
+</html>

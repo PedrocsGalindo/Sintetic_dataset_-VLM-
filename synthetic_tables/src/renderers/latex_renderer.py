@@ -41,7 +41,7 @@ class LatexFieldView:
 class LatexRecordCardView:
     """Represent one record preview card."""
 
-    record_label_escaped: str
+    title_escaped: str
     summary_escaped: str
     lead_fields: list[LatexFieldView]
     detail_fields: list[LatexFieldView]
@@ -92,11 +92,11 @@ class LatexRenderer:
     _MAX_ROW_LEVEL_CHART_ROWS = 75
     _MAX_POINTS_PER_CHART = 25
     _CHART_POINT_SPACING = 2.0
-    _MAX_VISIBLE_COLUMNS_PER_BLOCK = 7
+    _MAX_VISIBLE_COLUMNS_PER_BLOCK = 13
     _MAX_VISIBLE_COLUMNS_PORTRAIT = _MAX_VISIBLE_COLUMNS_PER_BLOCK
     _MAX_VISIBLE_COLUMNS_LANDSCAPE = _MAX_VISIBLE_COLUMNS_PER_BLOCK
     _MAX_VISIBLE_COLUMNS_SPLIT_BLOCK = _MAX_VISIBLE_COLUMNS_PER_BLOCK
-    _MIN_TABCOLSEP_PT = 2.5
+    _MIN_TABCOLSEP_PT = 1.0
     _LONG_TEXT_MAX_VISUAL_LINES = 3
     _LONG_TEXT_MIN_CHARS_PER_LINE = 16
     _LONG_TEXT_WRAP_THRESHOLD = 30
@@ -118,7 +118,7 @@ class LatexRenderer:
         "executive_brief.tex.j2": "Executive Brief",
         "editorial_report.tex.j2": "Editorial Report",
         "data_memo.tex.j2": "Data Memo",
-        "record_cards.tex.j2": "Record Cards",
+        "record_cards.tex.j2": "Data Cards",
         "split_matrix.tex.j2": "Split Matrix",
         "default_table.tex.j2": "Structured Table",
     }
@@ -139,24 +139,18 @@ class LatexRenderer:
         render_mode = self._render_mode_for_template(template_name)
         template = self.environment.get_template(template_name)
 
-        column_dtypes = ["anchor", *[column.dtype for column in table.schema.columns]]
-        column_kinds = ["compact", *[self._column_kind(column.dtype) for column in table.schema.columns]]
+        column_dtypes = [column.dtype for column in table.schema.columns]
+        column_kinds = [self._column_kind(column.dtype) for column in table.schema.columns]
         columns = [
-            LatexColumnView(header_escaped="Record"),
-            *[
-                LatexColumnView(header_escaped=self._escape_latex(self._display_name(column_schema.name)))
-                for column_schema in table.schema.columns
-            ],
+            LatexColumnView(header_escaped=self._escape_latex(self._display_name(column_schema.name)))
+            for column_schema in table.schema.columns
         ]
         rows = [
             [
-                self._escape_latex(f"Record {row_index:03d}"),
-                *[
-                    self._escape_latex("" if row[column_name] is None else str(row[column_name]))
-                    for column_name in table.columns
-                ],
+                self._escape_latex("" if row[column_name] is None else str(row[column_name]))
+                for column_name in table.columns
             ]
-            for row_index, row in enumerate(table.rows, start=1)
+            for row in table.rows
         ]
 
         layout_plan = self._plan_table_layout(table, style, column_dtypes, column_kinds)
@@ -270,10 +264,10 @@ class LatexRenderer:
         ]
 
     def _record_cards(self, table: GeneratedTable, limit: int = 6) -> list[LatexRecordCardView]:
-        """Build preview cards that preserve record identity while keeping the layout compact."""
+        """Build preview cards from source-table values while keeping the layout compact."""
 
         cards: list[LatexRecordCardView] = []
-        for row_index, row in enumerate(table.rows[: min(limit, len(table.rows))], start=1):
+        for row in table.rows[: min(limit, len(table.rows))]:
             field_views: list[LatexFieldView] = []
             for column_schema in table.schema.columns[: min(8, len(table.schema.columns))]:
                 raw_value = row.get(column_schema.name)
@@ -288,13 +282,25 @@ class LatexRenderer:
             summary = self._record_summary(row, table)
             cards.append(
                 LatexRecordCardView(
-                    record_label_escaped=self._escape_latex(f"Record {row_index:03d}"),
+                    title_escaped=self._escape_latex(self._record_title(row, table)),
                     summary_escaped=self._escape_latex(summary),
                     lead_fields=field_views[:4],
                     detail_fields=field_views[4:8],
                 )
             )
         return cards
+
+    def _record_title(self, row: dict[str, object], table: GeneratedTable) -> str:
+        """Choose a visible card title from source-table values only."""
+
+        for column_schema in table.schema.columns:
+            raw_value = row.get(column_schema.name)
+            if raw_value is None:
+                continue
+            value = str(raw_value).strip()
+            if value:
+                return f"{self._display_name(column_schema.name)}: {self._truncate_text(value, 80)}"
+        return "Entry"
 
     def _record_summary(self, row: dict[str, object], table: GeneratedTable) -> str:
         """Create one concise summary line for a record card."""
@@ -320,43 +326,37 @@ class LatexRenderer:
         return "No descriptive content available."
 
     def _preview_table(self, table: GeneratedTable, layout_plan: LatexTableLayoutPlan) -> dict[str, object] | None:
-        """Build a very small first-page table preview with stable record anchors."""
+        """Build a very small first-page table preview from source columns."""
 
         if not table.rows or not table.schema.columns:
             return None
 
         data_column_limit = min(table.n_cols, 4 if table.n_cols <= 4 else 3)
         preview_columns = list(table.schema.columns[:data_column_limit])
-        preview_data_width = 0.82 / max(1, len(preview_columns))
-        preview_headers = ["Record"] + [self._display_name(column.name) for column in preview_columns]
+        preview_data_width = 0.98 / max(1, len(preview_columns))
+        preview_headers = [self._display_name(column.name) for column in preview_columns]
         preview_rows = [
             [
-                self._escape_latex(f"Record {row_index:03d}"),
-                *[
-                    self._format_latex_cell_value(
-                        raw_value=row.get(column.name),
-                        column=column,
-                        width_fraction=preview_data_width,
-                        is_landscape=layout_plan.is_landscape,
-                        font_command="\\footnotesize",
-                        tabcolsep_pt=layout_plan.tabcolsep_pt,
-                    )
-                    for column in preview_columns
-                ],
+                self._format_latex_cell_value(
+                    raw_value=row.get(column.name),
+                    column=column,
+                    width_fraction=preview_data_width,
+                    is_landscape=layout_plan.is_landscape,
+                    font_command="\\footnotesize",
+                    tabcolsep_pt=layout_plan.tabcolsep_pt,
+                )
+                for column in preview_columns
             ]
-            for row_index, row in enumerate(table.rows[: min(4, len(table.rows))], start=1)
+            for row in table.rows[: min(4, len(table.rows))]
         ]
         preview_column_spec = " ".join(
-            [
-                r">{\raggedright\arraybackslash}p{0.18\linewidth}",
-                *[r">{\raggedright\arraybackslash}X" for _ in preview_columns],
-            ]
+            [r">{\centering\arraybackslash}X" for _ in preview_columns]
         )
 
         return {
-            "title_escaped": self._escape_latex("Traceable Preview"),
+            "title_escaped": self._escape_latex("Data Preview"),
             "subtitle_escaped": self._escape_latex(
-                "A compact sample of leading fields. The detailed row index continues on later pages."
+                "A compact sample of leading fields from the generated source table."
             ),
             "headers": [self._escape_latex(header) for header in preview_headers],
             "rows": preview_rows,
@@ -459,26 +459,27 @@ class LatexRenderer:
 
     def _layout_settings(self, name: str, style: TableStyle) -> LatexLayoutSettings:
         """Build one concrete LaTeX fit mode."""
-
+        target_width_fraction = 1.0
+        max_pressure = 0.15
         if name == "portrait":
             return LatexLayoutSettings(
                 name=name,
                 is_landscape=False,
                 max_visible_columns=self._MAX_VISIBLE_COLUMNS_PORTRAIT,
-                tabcolsep_pt=max(self._MIN_TABCOLSEP_PT, min(float(style.padding), 5.0)),
+                tabcolsep_pt=1.5,
                 font_command="\\small",
-                target_width_fraction=0.98,
-                max_pressure=0.30,
+                target_width_fraction=target_width_fraction,
+                max_pressure=max_pressure,
             )
         if name == "landscape":
             return LatexLayoutSettings(
                 name=name,
                 is_landscape=True,
                 max_visible_columns=self._MAX_VISIBLE_COLUMNS_LANDSCAPE,
-                tabcolsep_pt=max(self._MIN_TABCOLSEP_PT, min(float(style.padding), 4.0)),
+                tabcolsep_pt=1.5,
                 font_command="\\footnotesize",
-                target_width_fraction=0.98,
-                max_pressure=0.26,
+                target_width_fraction=target_width_fraction,
+                max_pressure=max_pressure,
             )
         if name == "landscape-compact":
             return LatexLayoutSettings(
@@ -487,8 +488,8 @@ class LatexRenderer:
                 max_visible_columns=self._MAX_VISIBLE_COLUMNS_LANDSCAPE,
                 tabcolsep_pt=self._MIN_TABCOLSEP_PT,
                 font_command="\\scriptsize",
-                target_width_fraction=0.98,
-                max_pressure=0.22,
+                target_width_fraction=target_width_fraction,
+                max_pressure=max_pressure,
             )
         if name == "split":
             return LatexLayoutSettings(
@@ -497,17 +498,17 @@ class LatexRenderer:
                 max_visible_columns=self._MAX_VISIBLE_COLUMNS_SPLIT_BLOCK,
                 tabcolsep_pt=self._MIN_TABCOLSEP_PT,
                 font_command="\\footnotesize",
-                target_width_fraction=0.98,
-                max_pressure=0.24,
+                target_width_fraction=target_width_fraction,
+                max_pressure=max_pressure,
             )
         raise ValueError(f"Unknown LaTeX layout mode: {name}")
 
     @staticmethod
     def _geometry_options(layout: LatexLayoutSettings) -> str:
         if layout.is_landscape:
-            margin = "0.48in" if layout.name in {"landscape-compact", "split"} else "0.5in"
+            margin = "0.35in" if layout.name in {"landscape-compact", "split"} else "0.4in"
             return f"landscape, margin={margin}"
-        return "margin=0.65in"
+        return "margin=0.5in"
 
     @staticmethod
     def _arraystretch_for_layout(style: TableStyle, layout: LatexLayoutSettings) -> float:
@@ -526,22 +527,21 @@ class LatexRenderer:
         if not self._within_visible_column_limit(columns, layout):
             return False
 
-        dtypes = ["anchor", *[column.dtype for column in columns]]
+        dtypes = [column.dtype for column in columns]
         minimum_width = sum(self._layout_minimum_width(dtype, layout) for dtype in dtypes)
-        if minimum_width > layout.target_width_fraction:
+        target_width_fraction = self._table_target_width_fraction(layout, len(columns))
+        if minimum_width > target_width_fraction:
             return False
 
-        ideal_width = self._layout_minimum_width("anchor", layout) + sum(
-            self._layout_ideal_width(table, column, layout) for column in columns
-        )
-        if ideal_width <= layout.target_width_fraction:
+        ideal_width = sum(self._layout_ideal_width(table, column, layout) for column in columns)
+        if ideal_width <= target_width_fraction:
             return True
 
         compression_room = ideal_width - minimum_width
         if compression_room <= 0:
             return True
 
-        compression_ratio = (layout.target_width_fraction - minimum_width) / compression_room
+        compression_ratio = (target_width_fraction - minimum_width) / compression_room
         return compression_ratio >= layout.max_pressure
 
     def _partition_columns_for_layout(
@@ -549,7 +549,7 @@ class LatexRenderer:
         table: GeneratedTable,
         layout: LatexLayoutSettings,
     ) -> list[list[ColumnSchema]]:
-        """Split data columns into readable contiguous groups that repeat the Record anchor."""
+        """Split data columns into readable contiguous groups."""
 
         groups: list[list[ColumnSchema]] = []
         current_group: list[ColumnSchema] = []
@@ -567,9 +567,9 @@ class LatexRenderer:
 
     @staticmethod
     def _visible_column_count(columns: list[ColumnSchema]) -> int:
-        """Count user-visible LaTeX columns, including the repeated Record anchor."""
+        """Count user-visible LaTeX columns."""
 
-        return 1 + len(columns)
+        return len(columns)
 
     def _within_visible_column_limit(
         self,
@@ -587,34 +587,31 @@ class LatexRenderer:
         column_groups: list[list[ColumnSchema]],
         layout: LatexLayoutSettings,
     ) -> list[dict[str, object]]:
-        """Build readable detail tables while repeating the Record anchor."""
+        """Build readable detail tables from source columns."""
 
         sections: list[dict[str, object]] = []
         for section_index, columns in enumerate(column_groups, start=1):
-            section_dtypes = ["anchor", *[column.dtype for column in columns]]
-            section_kinds = ["compact", *[self._column_kind(column.dtype) for column in columns]]
+            section_dtypes = [column.dtype for column in columns]
+            section_kinds = [self._column_kind(column.dtype) for column in columns]
             width_fractions = self._section_width_fractions(table, columns, layout)
             font_command = self._section_font_command(len(section_dtypes), len(column_groups), layout)
-            section_columns = [LatexColumnView(header_escaped="Record")] + [
+            section_columns = [
                 LatexColumnView(header_escaped=self._escape_latex(self._display_name(column.name)))
                 for column in columns
             ]
             section_rows = [
                 [
-                    self._escape_latex(f"Record {row_index:03d}"),
-                    *[
-                        self._format_latex_cell_value(
-                            raw_value=row.get(column.name),
-                            column=column,
-                            width_fraction=width_fractions[column_index + 1],
-                            is_landscape=layout.is_landscape,
-                            font_command=font_command,
-                            tabcolsep_pt=layout.tabcolsep_pt,
-                        )
-                        for column_index, column in enumerate(columns)
-                    ],
+                    self._format_latex_cell_value(
+                        raw_value=row.get(column.name),
+                        column=column,
+                        width_fraction=width_fractions[column_index],
+                        is_landscape=layout.is_landscape,
+                        font_command=font_command,
+                        tabcolsep_pt=layout.tabcolsep_pt,
+                    )
+                    for column_index, column in enumerate(columns)
                 ]
-                for row_index, row in enumerate(table.rows, start=1)
+                for row in table.rows
             ]
             if len(column_groups) == 1:
                 title = "Full Index"
@@ -623,10 +620,7 @@ class LatexRenderer:
                 first_label = self._display_name(columns[0].name)
                 last_label = self._display_name(columns[-1].name)
                 title = f"Detail Section {section_index}"
-                subtitle = (
-                    f"Columns from {first_label} through {last_label}. "
-                    "Each section repeats the Record anchor so rows remain traceable."
-                )
+                subtitle = f"Columns from {first_label} through {last_label}."
             sections.append(
                 {
                     "title_escaped": self._escape_latex(title),
@@ -666,18 +660,35 @@ class LatexRenderer:
     ) -> list[float]:
         """Allocate safe p-column widths for one LaTeX table section."""
 
-        dtypes = ["anchor", *[column.dtype for column in columns]]
+        dtypes = [column.dtype for column in columns]
         minimums = [self._layout_minimum_width(dtype, layout) for dtype in dtypes]
-        ideals = [self._layout_ideal_width_for_dtype("anchor", layout)] + [
+        ideals = [
             self._layout_ideal_width(table, column, layout) for column in columns
         ]
-        flex_weights = [0.7, *[self._layout_flex_weight(table, column) for column in columns]]
+        flex_weights = [self._layout_flex_weight(table, column) for column in columns]
         return self._expand_widths_between_minimum_and_ideal(
             minimums=minimums,
             ideals=ideals,
             flex_weights=flex_weights,
-            target_total=layout.target_width_fraction,
+            target_total=self._table_target_width_fraction(layout, len(columns)),
         )
+
+    @staticmethod
+    def _table_target_width_fraction(layout: LatexLayoutSettings, column_count: int) -> float:
+        """Reserve width for LaTeX inter-column padding so p-columns do not overrun."""
+
+        if column_count <= 0:
+            return min(layout.target_width_fraction, 0.98)
+
+        # p{...} widths do not include the tabcolsep glue between columns.
+        # Reserving that space keeps longtable inside the usable page width.
+        approximate_linewidth_pt = 650.0 if layout.is_landscape else 430.0
+        tab_padding_fraction = (
+            2.0 * layout.tabcolsep_pt * max(column_count - 1, 0)
+        ) / approximate_linewidth_pt
+        rounding_safety_fraction = 0.018 if column_count >= 8 else 0.012
+        target = layout.target_width_fraction - tab_padding_fraction - rounding_safety_fraction
+        return max(0.72, min(layout.target_width_fraction, target))
 
     def _format_latex_cell_value(
         self,
@@ -983,27 +994,24 @@ class LatexRenderer:
         for title, columns in column_groups:
             if not columns:
                 continue
-            section_columns = [LatexColumnView(header_escaped="Record")] + [
+            section_columns = [
                 LatexColumnView(header_escaped=self._escape_latex(self._display_name(column.name)))
                 for column in columns
             ]
             section_rows = [
                 [
-                    self._escape_latex(f"Record {row_index:03d}"),
-                    *[
-                        self._escape_latex("" if row.get(column.name) is None else str(row.get(column.name)))
-                        for column in columns
-                    ],
+                    self._escape_latex("" if row.get(column.name) is None else str(row.get(column.name)))
+                    for column in columns
                 ]
-                for row_index, row in enumerate(table.rows, start=1)
+                for row in table.rows
             ]
-            section_dtypes = ["anchor", *[column.dtype for column in columns]]
-            section_kinds = ["compact", *[self._column_kind(column.dtype) for column in columns]]
+            section_dtypes = [column.dtype for column in columns]
+            section_kinds = [self._column_kind(column.dtype) for column in columns]
             sections.append(
                 {
                     "title_escaped": self._escape_latex(title),
                     "subtitle_escaped": self._escape_latex(
-                        "Each section repeats the same Record anchor so both matrices map directly to the source rows."
+                        "Companion matrix with the original source row order preserved."
                     ),
                     "columns": section_columns,
                     "rows": section_rows,
@@ -1086,7 +1094,7 @@ class LatexRenderer:
             else:
                 lines.append("Chart: omitted because no stable one-column summary was available.")
         if has_sectioned_details:
-            lines.append("Detailed rows move to later pages and are split into smaller sections with repeated Record anchors.")
+            lines.append("Detailed rows move to later pages and are split into smaller sections.")
         else:
             lines.append("Detailed rows move to later pages after the overview page so the PDF stays readable.")
         return [self._escape_latex(line) for line in lines]
@@ -1123,6 +1131,8 @@ class LatexRenderer:
                 continue
 
             x_axis = self._chart_x_axis(table, numeric_rows)
+            if x_axis is None:
+                continue
             values = [float(point["numeric_value"]) for point in numeric_rows]
             minimum = min(values)
             maximum = max(values)
@@ -1138,16 +1148,16 @@ class LatexRenderer:
             for chunk_index, chart_chunk in enumerate(chart_chunks, start=1):
                 points: list[LatexChartPointView] = []
                 for index, point in enumerate(chart_chunk):
-                    record_label = f"{int(point['row_index']):03d}"
+                    point_label = str(point["index_label"])
                     points.append(
                         LatexChartPointView(
                             index=self._chart_point_index(
-                                raw_index_label=record_label,
+                                raw_index_label=point_label,
                                 fallback_row_index=int(point["row_index"]),
                             ),
-                            index_label_escaped=self._escape_latex(record_label),
+                            index_label_escaped=self._escape_latex(point_label),
                             plot_position=float(index) * self._CHART_POINT_SPACING,
-                            label_escaped=self._escape_latex(record_label),
+                            label_escaped=self._escape_latex(point_label),
                             value=float(point["numeric_value"]),
                             value_label_escaped=self._escape_latex(
                                 self._format_numeric(float(point["numeric_value"]))
@@ -1190,8 +1200,8 @@ class LatexRenderer:
         self,
         table: GeneratedTable,
         numeric_rows: list[dict[str, object]],
-    ) -> dict[str, object]:
-        """Choose a traceable row-level x-axis for the LaTeX chart."""
+    ) -> dict[str, object] | None:
+        """Choose a source-column x-axis for the LaTeX chart."""
 
         for column_schema in table.schema.columns:
             if column_schema.dtype != "date":
@@ -1203,7 +1213,7 @@ class LatexRenderer:
                 "axis_label_plain": self._display_name(column_schema.name),
                 "points": labels,
                 "insight_plain": (
-                    f"Unique dates on the x-axis preserve direct row traceability for each source row."
+                    f"Unique dates on the x-axis come directly from the source table."
                 ),
             }
 
@@ -1221,21 +1231,7 @@ class LatexRenderer:
                 ),
             }
 
-        return {
-            "axis_label_plain": "Record",
-            "points": [
-                {
-                    "label": f"{int(point['row_index']):03d}",
-                    "index_label": f"{int(point['row_index']):03d}",
-                    "row_index": int(point["row_index"]),
-                    "numeric_value": float(point["numeric_value"]),
-                }
-                for point in numeric_rows
-            ],
-            "insight_plain": (
-                "Repeated or unavailable dates prevented a unique date axis, so the chart uses explicit row indices."
-            ),
-        }
+        return None
 
     def _axis_labels_for_column(
         self,
@@ -1311,21 +1307,11 @@ class LatexRenderer:
 
     @staticmethod
     def _alignment_token(dtype: str, alignment_profile: str, width_fraction: float) -> str:
-        width = f"{width_fraction:.3f}\\linewidth"
-        if dtype == "anchor":
-            return rf">{{\raggedright\arraybackslash}}p{{{width}}}"
-        if alignment_profile == "left":
-            return rf">{{\raggedright\arraybackslash}}p{{{width}}}"
-        if alignment_profile == "center":
-            return rf">{{\centering\arraybackslash}}p{{{width}}}"
-        if alignment_profile == "numeric_right":
-            if dtype in {"integer", "decimal", "percentage", "fraction"}:
-                return rf">{{\raggedleft\arraybackslash}}p{{{width}}}"
-            return rf">{{\raggedright\arraybackslash}}p{{{width}}}"
-        if dtype in {"integer", "decimal", "percentage", "fraction"}:
+        """Build a compact, non-centered LaTeX alignment token for one column."""
+
+        width = f"{width_fraction:.5f}\\linewidth"
+        if alignment_profile == "numeric_right" and dtype in {"integer", "decimal", "percentage", "fraction"}:
             return rf">{{\raggedleft\arraybackslash}}p{{{width}}}"
-        if dtype in {"date", "identifier", "alphanumeric_code", "symbolic_mixed"}:
-            return rf">{{\centering\arraybackslash}}p{{{width}}}"
         return rf">{{\raggedright\arraybackslash}}p{{{width}}}"
 
     @staticmethod

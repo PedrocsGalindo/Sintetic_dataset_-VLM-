@@ -25,7 +25,7 @@ class MarkdownFieldView:
 class MarkdownRecordView:
     """Represent one row repackaged for markdown layouts."""
 
-    record_label: str
+    title: str
     fields: list[MarkdownFieldView]
     line_fields: list[MarkdownFieldView]
     detail_fields: list[MarkdownFieldView]
@@ -47,7 +47,6 @@ class MarkdownLayoutProfile:
 class MarkdownRenderer:
     """Render a generated table into multiple markdown layout styles."""
 
-    _RECORD_HEADER = "Record"
     _FIRST_TEMPLATE_NAME = SIMPLE_LAYOUT_NAME
     _FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS = 5
 
@@ -101,13 +100,12 @@ class MarkdownRenderer:
         style: TableStyle | None,
         template_name: str,
     ) -> str:
-        """Split the first dense Markdown template into Record-anchored blocks."""
+        """Split the first dense Markdown template into column blocks."""
 
-        visible_column_count = 1 + len(table.columns)
-        if template_name != self._FIRST_TEMPLATE_NAME or visible_column_count <= self._FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS:
+        if template_name != self._FIRST_TEMPLATE_NAME or len(table.columns) <= self._FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS:
             return self._render_plain_table(table, style)
 
-        data_columns_per_block = max(1, self._FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS - 1)
+        data_columns_per_block = self._FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS
         blocks: list[str] = []
         for block_index, start in enumerate(range(0, len(table.columns), data_columns_per_block), start=1):
             columns = list(table.columns[start : start + data_columns_per_block])
@@ -123,15 +121,15 @@ class MarkdownRenderer:
         style: TableStyle | None,
         columns: list[str],
     ) -> str:
-        """Render a Markdown table with Record plus the requested real columns."""
+        """Render a Markdown table with the requested real columns."""
 
-        header_cells = [self._RECORD_HEADER, *[self._display_name(column) for column in columns]]
-        separator_cells = [":---", *self._separator_cells_for_columns(table, style, columns)]
+        header_cells = [self._display_name(column) for column in columns]
+        separator_cells = self._separator_cells_for_columns(table, style, columns)
         rows = [
             "| "
-            + " | ".join([self._row_label(row_index), *[self._escape_cell(row.get(column)) for column in columns]])
+            + " | ".join([self._escape_cell(row.get(column)) for column in columns])
             + " |"
-            for row_index, row in enumerate(table.rows, start=1)
+            for row in table.rows
         ]
         header = "| " + " | ".join(header_cells) + " |"
         separator = "| " + " | ".join(separator_cells) + " |"
@@ -163,18 +161,14 @@ class MarkdownRenderer:
             "",
             f"- Rows: {table.n_rows}",
             f"- Columns: {table.n_cols}",
-            f"- Layout: record list",
-            (
-                "- Traceability: Record anchors repeat across matrix splits."
-                if layout_profile.split_matrices
-                else "- Traceability: one block per record."
-            ),
+            f"- Layout: row list",
+            "- Rows are grouped by values from the source table.",
             "",
-            "## Records",
+            "## Rows",
             "",
         ]
         for record in records:
-            lines.append(f"### {record.record_label}")
+            lines.append(f"### {record.title}")
             lines.append("")
             lines.append(f"> {self._escape_inline(record.narrative)}")
             lines.append("")
@@ -212,13 +206,9 @@ class MarkdownRenderer:
             f"- Rows: {table.n_rows}",
             f"- Columns: {table.n_cols}",
             "- Layout: mixed summary, detail list, and free text",
-            (
-                "- Traceability: Record anchors are repeated in each matrix when the field set is split."
-                if layout_profile.split_matrices
-                else "- Traceability: each note stays grouped under one record."
-            ),
+            "- Rows are grouped by values from the source table.",
             "",
-            "## Record Notes",
+            "## Row Notes",
             "",
         ]
         for record in records:
@@ -226,7 +216,7 @@ class MarkdownRenderer:
                 f"{field.label}: {self._escape_inline(field.value)}"
                 for field in record.line_fields[: layout_profile.summary_field_limit]
             )
-            lines.append(f"### {record.record_label}")
+            lines.append(f"### {record.title}")
             lines.append("")
             lines.append(f"**Summary:** {summary}")
             lines.append("")
@@ -266,7 +256,7 @@ class MarkdownRenderer:
             "",
         ]
         for record in records[: min(8, len(records))]:
-            lines.append(f"### {record.record_label}")
+            lines.append(f"### {record.title}")
             lines.append(f"> {self._wrap_free_text(record.narrative)}")
             lines.append("")
             if record.compact_fields:
@@ -287,7 +277,7 @@ class MarkdownRenderer:
                 f"{field.label}: {self._escape_inline(field.value)}"
                 for field in record.line_fields[: layout_profile.full_index_field_limit]
             )
-            lines.append(f"- **{record.record_label}** {short_summary}")
+            lines.append(f"- **{record.title}** {short_summary}")
         return "\n".join(lines).rstrip()
 
     def _build_records(self, table: GeneratedTable) -> list[MarkdownRecordView]:
@@ -296,7 +286,7 @@ class MarkdownRenderer:
         fields_by_row: list[MarkdownRecordView] = []
         inline_count = min(6, len(table.columns))
 
-        for row_index, row in enumerate(table.rows, start=1):
+        for row in table.rows:
             fields: list[MarkdownFieldView] = []
             line_fields: list[MarkdownFieldView] = []
             detail_fields: list[MarkdownFieldView] = []
@@ -326,7 +316,7 @@ class MarkdownRenderer:
             narrative = self._narrative_for(fields, text_fields, compact_fields)
             fields_by_row.append(
                 MarkdownRecordView(
-                    record_label=self._row_label(row_index),
+                    title=self._record_title(fields, text_fields, compact_fields),
                     fields=fields,
                     line_fields=line_fields,
                     detail_fields=detail_fields,
@@ -344,7 +334,7 @@ class MarkdownRenderer:
         style: TableStyle | None,
         layout_profile: MarkdownLayoutProfile,
     ) -> str:
-        """Render wide string-heavy tables as two anchored matrices instead of one dense table."""
+        """Render wide string-heavy tables as two matrices instead of one dense table."""
 
         split_after = min(layout_profile.split_after, len(table.columns) - 1)
         column_groups = [
@@ -356,14 +346,14 @@ class MarkdownRenderer:
             "## Table Overview",
             "",
             "- Layout: split matrix for string-heavy columns",
-            "- Traceability: each matrix repeats the same `Record NNN` anchor for every row.",
+            "- Each matrix keeps the original row order without adding generated labels.",
             "",
         ]
 
         for group_label, columns in column_groups:
             if not columns:
                 continue
-            lines.extend([f"## {group_label}", "", "_Shared anchor: every row repeats its record label in this matrix._", ""])
+            lines.extend([f"## {group_label}", ""])
             lines.append(self._render_plain_table_for_columns(table, style, list(columns)))
             lines.append("")
 
@@ -394,12 +384,6 @@ class MarkdownRenderer:
         """Convert internal slugs into reader-friendly labels."""
 
         return value.replace("_", " ").title()
-
-    @staticmethod
-    def _row_label(row_index: int) -> str:
-        """Return the renderer-owned Record value for one table row."""
-
-        return f"Record {row_index:03d}"
 
     @staticmethod
     def _escape_cell(value: object) -> str:
@@ -484,12 +468,12 @@ class MarkdownRenderer:
         fields: list[MarkdownFieldView],
         layout_profile: MarkdownLayoutProfile,
     ) -> None:
-        """Append one or two field matrices with repeated record anchors for traceability."""
+        """Append one or two field matrices for a grouped source row."""
 
         for matrix_label, group_fields in self._matrix_groups(record, fields, layout_profile):
             if not group_fields:
                 continue
-            lines.append(f"#### {matrix_label} · {record.record_label}")
+            lines.append(f"#### {matrix_label}")
             lines.extend(
                 f"- **{field.label}:** {self._escape_inline(field.value)}"
                 for field in group_fields
@@ -502,7 +486,7 @@ class MarkdownRenderer:
         fields: list[MarkdownFieldView],
         layout_profile: MarkdownLayoutProfile,
     ) -> list[tuple[str, list[MarkdownFieldView]]]:
-        """Split dense field sets into two stable groups while keeping record identity visible."""
+        """Split dense field sets into two stable groups."""
 
         if not layout_profile.split_matrices or len(fields) <= layout_profile.split_after:
             return [("Matrix A", fields)]
@@ -562,17 +546,30 @@ class MarkdownRenderer:
         fields: list[MarkdownFieldView],
         layout_profile: MarkdownLayoutProfile,
     ) -> None:
-        """Append one or two field matrices with repeated record anchors for traceability."""
+        """Append one or two field matrices for a grouped source row."""
 
         for matrix_label, group_fields in self._matrix_groups(record, fields, layout_profile):
             if not group_fields:
                 continue
-            lines.append(f"#### {matrix_label} - {record.record_label}")
+            lines.append(f"#### {matrix_label}")
             lines.extend(
                 f"- **{field.label}:** {self._escape_inline(field.value)}"
                 for field in group_fields
             )
             lines.append("")
+
+    def _record_title(
+        self,
+        fields: list[MarkdownFieldView],
+        text_fields: list[MarkdownFieldView],
+        compact_fields: list[MarkdownFieldView],
+    ) -> str:
+        """Choose a visible row title from source-table values only."""
+
+        for field in [*text_fields, *compact_fields, *fields]:
+            if field.value and field.value != "-":
+                return self._escape_inline(f"{field.label}: {field.value}")
+        return "Entry"
 
     @staticmethod
     def _style_comment(style: TableStyle | None, template_name: str) -> str:

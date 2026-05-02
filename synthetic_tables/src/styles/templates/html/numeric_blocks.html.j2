@@ -18,7 +18,7 @@
 
     body {
       margin: 0;
-      padding: 24px;
+      padding: 10px 12px;
       background:
         radial-gradient(circle at top right, rgba(255,255,255,0.86), transparent 30%),
         linear-gradient(180deg, #f7fbf8 0%, var(--page-bg) 100%);
@@ -30,11 +30,13 @@
 
     .numbers-sheet {
       width: var(--sheet-width);
-      margin: 0 auto;
+      margin: 0;
       background: rgba(255,255,255,0.96);
       border: 1px {{ css.border_style }} var(--border-color);
-      padding: 20px;
+      padding: 12px;
       box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+      max-width: 100%;
+      box-sizing: border-box;
     }
 
     .title {
@@ -44,7 +46,7 @@
     }
 
     .subtitle {
-      margin: 0 0 20px 0;
+      margin: 0 0 12px 0;
       max-width: 86ch;
       opacity: 0.8;
     }
@@ -52,18 +54,18 @@
     .block-grid {
       display: grid;
       grid-template-columns: repeat({{ css.dense_grid_columns }}, minmax(0, 1fr));
-      gap: 14px;
+      gap: 8px;
     }
 
     .block {
-      padding: 14px;
+      padding: 9px;
       background: linear-gradient(180deg, rgba(216, 243, 229, 0.5), rgba(255,255,255,0.96));
       border: 1px solid rgba(74, 107, 90, 0.24);
-      min-height: 170px;
+      min-height: 142px;
     }
 
     .block-title {
-      margin: 0 0 10px 0;
+      margin: 0 0 7px 0;
       font-size: 0.9em;
       text-transform: uppercase;
       letter-spacing: 0.08em;
@@ -73,8 +75,8 @@
     .chip {
       display: grid;
       gap: 2px;
-      margin-bottom: 10px;
-      padding-bottom: 9px;
+      margin-bottom: 7px;
+      padding-bottom: 6px;
       border-bottom: 1px dashed rgba(74, 107, 90, 0.24);
     }
 

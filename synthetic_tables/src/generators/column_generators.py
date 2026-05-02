@@ -46,6 +46,26 @@ LONG_WORDS: tuple[str, ...] = (
     "evaluation",
 )
 
+COMPACT_TEXT_VALUES: tuple[str, ...] = (
+    "Urban Delta",
+    "Prime Flow",
+    "North Ref",
+    "Signal Plan",
+    "Clear Ops",
+    "Metro Base",
+    "Amber Track",
+)
+
+ULTRA_COMPACT_TEXT_VALUES: tuple[str, ...] = (
+    "URB-DELTA",
+    "SIG-PLAN",
+    "AMB-TRK",
+    "METRO-B",
+    "NORTH-R",
+    "CLR-OPS",
+    "PRM-FLOW",
+)
+
 
 @dataclass
 class BaseColumnGenerator:
@@ -86,6 +106,10 @@ class TextShortColumnGenerator(BaseColumnGenerator):
         super().__init__(dtype="text_short", rng=rng)
 
     def _generate_value(self, column: ColumnSchema, row_index: int) -> str:
+        profile_value = _generate_profile_text(column=column, rng=self.rng)
+        if profile_value is not None:
+            return profile_value
+
         min_words = int(column.metadata.get("min_words", 1))
         max_words = int(column.metadata.get("max_words", 3))
         n_words = self.rng.randint(min_words, max_words)
@@ -103,12 +127,35 @@ class TextLongColumnGenerator(BaseColumnGenerator):
         super().__init__(dtype="text_long", rng=rng)
 
     def _generate_value(self, column: ColumnSchema, row_index: int) -> str:
+        profile_value = _generate_profile_text(column=column, rng=self.rng)
+        if profile_value is not None:
+            return profile_value
+
         min_words = int(column.metadata.get("min_words", 6))
         max_words = int(column.metadata.get("max_words", 14))
+        max_length = column.metadata.get("max_length")
         n_words = self.rng.randint(min_words, max_words)
-        tokens = [self.rng.choice(LONG_WORDS if idx % 2 else SHORT_WORDS) for idx in range(n_words)]
+        tokens: list[str] = []
+        for idx in range(n_words):
+            next_word = self.rng.choice(LONG_WORDS if idx % 2 else SHORT_WORDS)
+            candidate = " ".join([*tokens, next_word])
+            if max_length is not None and len(candidate) > int(max_length) and len(tokens) >= min_words:
+                break
+            tokens.append(next_word)
         sentence = " ".join(tokens)
-        return _truncate_text(sentence[:1].upper() + sentence[1:], column.metadata.get("max_length"))
+        return _truncate_text(sentence[:1].upper() + sentence[1:], max_length)
+
+
+def _generate_profile_text(column: ColumnSchema, rng: random.Random) -> str | None:
+    """Generate profile-specific text when a compact table profile is configured."""
+
+    max_length = column.metadata.get("max_length")
+    profile = column.metadata.get("text_profile")
+    if profile == "compact_text":
+        return _truncate_text(rng.choice(COMPACT_TEXT_VALUES), max_length)
+    if profile == "ultra_compact_text":
+        return _truncate_text(rng.choice(ULTRA_COMPACT_TEXT_VALUES), max_length)
+    return None
 
 
 def _truncate_text(value: str, max_length: Any) -> str:
@@ -120,9 +167,14 @@ def _truncate_text(value: str, max_length: Any) -> str:
     limit = max(int(max_length), 0)
     if len(value) <= limit:
         return value
-    if limit <= 3:
-        return "." * limit
-    return f"{value[:limit - 3]}..."
+    if limit == 0:
+        return ""
+
+    truncated = value[:limit].rstrip()
+    last_space_index = truncated.rfind(" ")
+    if last_space_index > 0:
+        return truncated[:last_space_index].rstrip()
+    return truncated
 
 
 class IntegerColumnGenerator(BaseColumnGenerator):
@@ -176,6 +228,23 @@ class FractionColumnGenerator(BaseColumnGenerator):
         numerator = self.rng.randint(1, max(resolved_max_numerator, 1))
         denominator = self.rng.randint(max(numerator + 1, 2), resolved_max_denominator)
         return f"{numerator}/{denominator}"
+
+
+class ExponentialColumnGenerator(BaseColumnGenerator):
+    """Generate scientific notation strings."""
+
+    def __init__(self, rng: random.Random) -> None:
+        super().__init__(dtype="exponential", rng=rng)
+
+    def _generate_value(self, column: ColumnSchema, row_index: int) -> str:
+        min_coefficient = float(column.metadata.get("min_coefficient", 1.0))
+        max_coefficient = float(column.metadata.get("max_coefficient", 9.9))
+        min_exponent = int(column.metadata.get("min_exponent", -6))
+        max_exponent = int(column.metadata.get("max_exponent", 6))
+        precision = int(column.metadata.get("precision", 2))
+        coefficient = self.rng.uniform(min_coefficient, max_coefficient)
+        exponent = self.rng.randint(min_exponent, max_exponent)
+        return f"{coefficient:.{precision}f}e{exponent:+03d}"
 
 
 class DateColumnGenerator(BaseColumnGenerator):
@@ -247,6 +316,7 @@ def build_column_generator(column: ColumnSchema, seed: int) -> BaseColumnGenerat
         "decimal": DecimalColumnGenerator,
         "percentage": PercentageColumnGenerator,
         "fraction": FractionColumnGenerator,
+        "exponential": ExponentialColumnGenerator,
         "date": DateColumnGenerator,
         "identifier": IdentifierColumnGenerator,
         "alphanumeric_code": AlphanumericCodeColumnGenerator,

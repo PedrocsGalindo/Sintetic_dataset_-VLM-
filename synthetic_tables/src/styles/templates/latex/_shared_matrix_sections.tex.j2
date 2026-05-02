@@ -1,6 +1,6 @@
 {% if matrix_sections %}
 \section*{Split Matrix}
-\noindent\textit{Wide categorical layouts are split into companion matrices that repeat the same Record anchor in every section.}
+\noindent\textit{Wide categorical layouts are split into companion matrices using only source-table columns.}
 
 {% for section in matrix_sections %}
 \subsection*{ {{ section.title_escaped }} }
@@ -8,6 +8,7 @@
 
 \footnotesize
 \rowcolors{2}{HeaderFill!10}{white}
+\noindent
 \begin{longtable}{ {{ section.column_spec }} }
 \toprule
 {% for column in section.columns -%}

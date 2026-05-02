@@ -71,6 +71,18 @@ class LatexDiagnosticBundle:
     attempts: tuple[dict[str, str | bool | None], ...]
 
 
+@dataclass(frozen=True)
+class HTMLCaptureProfile:
+    """Describe the browser viewport and PDF page used for one HTML render."""
+
+    column_count: int
+    viewport_width: int
+    viewport_height: int
+    pdf_width: str | None
+    pdf_height: str | None
+    wide_table: bool
+
+
 class LatexRenderError(RuntimeError):
     """Base class for structured LaTeX PDF rendering failures."""
 
@@ -317,10 +329,11 @@ class PDFRenderer:
         """Render an HTML file to PDF while preserving the original HTML layout when possible."""
 
         html_source = source_path.read_text(encoding="utf-8")
-        if self._render_html_with_playwright(source_path, output_path):
+        capture_profile = self._html_capture_profile(html_source)
+        if self._render_html_with_playwright(source_path, output_path, capture_profile):
             return "playwright-chromium"
 
-        if self._render_html_with_weasyprint(source_path, html_source, output_path):
+        if self._render_html_with_weasyprint(source_path, html_source, output_path, capture_profile):
             return "weasyprint-html"
 
         sanitized_html = self._sanitize_html_for_pdf(html_source)
@@ -345,7 +358,12 @@ class PDFRenderer:
         if result.err:
             raise RuntimeError(f"Failed to render PDF with xhtml2pdf: {result.err}")
 
-    def _render_html_with_playwright(self, source_path: Path, output_path: Path) -> bool:
+    def _render_html_with_playwright(
+        self,
+        source_path: Path,
+        output_path: Path,
+        capture_profile: HTMLCaptureProfile,
+    ) -> bool:
         """Render the saved HTML file through Chromium for full CSS fidelity."""
 
         try:
@@ -354,24 +372,42 @@ class PDFRenderer:
         except ImportError:
             return False
 
-        page_css = self._html_print_css()
+        page_css = self._html_print_css(capture_profile)
         source_uri = source_path.resolve().as_uri()
 
         try:
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch()
+                browser = None
+                for launch_options in self._chromium_launch_options():
+                    try:
+                        browser = playwright.chromium.launch(**launch_options)
+                        break
+                    except PlaywrightError:
+                        continue
+                if browser is None:
+                    return False
                 try:
-                    page = browser.new_page()
+                    page = browser.new_page(
+                        viewport={
+                            "width": capture_profile.viewport_width,
+                            "height": capture_profile.viewport_height,
+                        }
+                    )
                     page.goto(source_uri, wait_until="load")
                     page.emulate_media(media="print")
                     page.add_style_tag(content=page_css)
-                    page.pdf(
-                        path=str(output_path),
-                        format=self._HTML_PAGE_FORMAT,
-                        print_background=True,
-                        prefer_css_page_size=False,
-                        margin=self._playwright_pdf_margin(),
-                    )
+                    pdf_options: dict[str, object] = {
+                        "path": str(output_path),
+                        "print_background": True,
+                        "prefer_css_page_size": False,
+                        "margin": self._playwright_pdf_margin(capture_profile),
+                    }
+                    if capture_profile.pdf_width and capture_profile.pdf_height:
+                        pdf_options["width"] = capture_profile.pdf_width
+                        pdf_options["height"] = capture_profile.pdf_height
+                    else:
+                        pdf_options["format"] = self._HTML_PAGE_FORMAT
+                    page.pdf(**pdf_options)
                 finally:
                     browser.close()
         except (OSError, PlaywrightError):
@@ -379,7 +415,48 @@ class PDFRenderer:
 
         return True
 
-    def _render_html_with_weasyprint(self, source_path: Path, html_source: str, output_path: Path) -> bool:
+    def _chromium_launch_options(self) -> tuple[dict[str, str], ...]:
+        """Return Playwright launch options, preferring bundled Chromium when present."""
+
+        options: list[dict[str, str]] = [{}]
+        executable_path = self._system_chromium_executable()
+        if executable_path is not None:
+            options.append({"executable_path": str(executable_path)})
+        return tuple(options)
+
+    @staticmethod
+    def _system_chromium_executable() -> Path | None:
+        """Find a local Chrome/Edge executable for environments without Playwright browsers."""
+
+        env_path = os.environ.get("SYNTHETIC_TABLES_CHROMIUM_PATH")
+        if env_path:
+            candidate = Path(env_path)
+            if candidate.exists():
+                return candidate
+
+        for executable_name in ("chrome", "msedge", "chromium", "chrome.exe", "msedge.exe", "chromium.exe"):
+            resolved = shutil.which(executable_name)
+            if resolved:
+                return Path(resolved)
+
+        candidates = (
+            Path("C:/Program Files/Google/Chrome/Application/chrome.exe"),
+            Path("C:/Program Files (x86)/Google/Chrome/Application/chrome.exe"),
+            Path("C:/Program Files/Microsoft/Edge/Application/msedge.exe"),
+            Path("C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"),
+        )
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _render_html_with_weasyprint(
+        self,
+        source_path: Path,
+        html_source: str,
+        output_path: Path,
+        capture_profile: HTMLCaptureProfile,
+    ) -> bool:
         """Render the original HTML/CSS with WeasyPrint when Chromium is unavailable."""
 
         try:
@@ -387,7 +464,7 @@ class PDFRenderer:
         except (ImportError, OSError):
             return False
 
-        page_css = CSS(string=self._html_print_css())
+        page_css = CSS(string=self._html_print_css(capture_profile))
 
         try:
             HTML(
@@ -400,18 +477,100 @@ class PDFRenderer:
 
         return True
 
-    def _html_print_css(self) -> str:
+    def _html_capture_profile(self, html_source: str) -> HTMLCaptureProfile:
+        """Choose a browser viewport and PDF page width from the rendered table width."""
+
+        parser = _FirstTableParser()
+        try:
+            parser.feed(html_source)
+        except ValueError:
+            column_count = 0
+        else:
+            column_count = len(parser.headers)
+
+        if column_count >= 12:
+            viewport_width = 1920
+        elif column_count >= 10:
+            viewport_width = 1600
+        elif column_count >= 8:
+            viewport_width = 1400
+        else:
+            viewport_width = 1200
+
+        viewport_height = 1400 if column_count < 10 else 1600
+        wide_table = column_count >= 8
+        return HTMLCaptureProfile(
+            column_count=column_count,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+            pdf_width=f"{viewport_width}px" if wide_table else None,
+            pdf_height=f"{viewport_height}px" if wide_table else None,
+            wide_table=wide_table,
+        )
+
+    def _html_print_css(self, capture_profile: HTMLCaptureProfile) -> str:
         """Inject print-only layout constraints for safer PDF page fit."""
 
-        page_margin = (
-            f"{self._HTML_PAGE_MARGIN_TOP} "
-            f"{self._HTML_PAGE_MARGIN_RIGHT} "
-            f"{self._HTML_PAGE_MARGIN_BOTTOM} "
-            f"{self._HTML_PAGE_MARGIN_LEFT}"
+        page_margin = self._html_print_page_margin(capture_profile)
+        page_size = (
+            f"{capture_profile.pdf_width} {capture_profile.pdf_height}"
+            if capture_profile.pdf_width and capture_profile.pdf_height
+            else self._HTML_PAGE_FORMAT
+        )
+        sheet_rule = (
+            ".table-wrap, .sheet {"
+            "width: var(--sheet-width) !important;"
+            "max-width: none !important;"
+            "margin: 0 !important;"
+            "padding: 16px !important;"
+            "overflow: visible !important;"
+            "box-shadow: none !important;"
+            "break-inside: avoid-page;"
+            "}"
+            ".stream-sheet, .numbers-sheet {"
+            "width: auto !important;"
+            "max-width: 100% !important;"
+            "margin: 0 auto !important;"
+            "padding: 16px !important;"
+            "overflow: hidden !important;"
+            "box-shadow: none !important;"
+            "break-inside: avoid-page;"
+            "}"
+        ) if capture_profile.wide_table else (
+            ".table-wrap, .sheet, .stream-sheet, .numbers-sheet {"
+            "width: auto !important;"
+            "max-width: 100% !important;"
+            "margin: 0 auto !important;"
+            "padding: 16px !important;"
+            "overflow: hidden !important;"
+            "box-shadow: none !important;"
+            "break-inside: avoid-page;"
+            "}"
+        )
+        table_rule = (
+            ".table-scroll {"
+            "overflow: visible !important;"
+            "}"
+            "img, svg, canvas {"
+            "max-width: 100% !important;"
+            "}"
+            "table {"
+            "width: 100% !important;"
+            "max-width: none !important;"
+            "table-layout: auto !important;"
+            "}"
+        ) if capture_profile.wide_table else (
+            "img, svg, canvas, table {"
+            "max-width: 100% !important;"
+            "}"
+            "table {"
+            "width: 100% !important;"
+            "table-layout: fixed !important;"
+            "}"
         )
         return (
             "@page {"
-            f"size: {self._HTML_PAGE_FORMAT};"
+            f"size: {page_size};"
             f"margin: {page_margin};"
             "}"
             "@media print {"
@@ -429,15 +588,7 @@ class PDFRenderer:
             "min-width: 0 !important;"
             "background: #ffffff !important;"
             "}"
-            ".table-wrap, .sheet, .stream-sheet, .numbers-sheet {"
-            "width: auto !important;"
-            "max-width: 100% !important;"
-            "margin: 0 auto !important;"
-            "padding: 16px !important;"
-            "overflow: hidden !important;"
-            "box-shadow: none !important;"
-            "break-inside: avoid-page;"
-            "}"
+            f"{sheet_rule}"
             ".masthead, .header {"
             "gap: 14px !important;"
             "}"
@@ -473,13 +624,7 @@ class PDFRenderer:
             "break-after: avoid-page !important;"
             "page-break-after: avoid !important;"
             "}"
-            "img, svg, canvas, table {"
-            "max-width: 100% !important;"
-            "}"
-            "table {"
-            "width: 100% !important;"
-            "table-layout: fixed !important;"
-            "}"
+            f"{table_rule}"
             "th, td {"
             "min-width: 0 !important;"
             "overflow-wrap: break-word !important;"
@@ -489,9 +634,28 @@ class PDFRenderer:
             "}"
         )
 
-    def _playwright_pdf_margin(self) -> dict[str, str]:
+    def _html_print_page_margin(self, capture_profile: HTMLCaptureProfile) -> str:
+        """Return the CSS @page margin string for the selected HTML profile."""
+
+        if capture_profile.wide_table:
+            return "0"
+        return (
+            f"{self._HTML_PAGE_MARGIN_TOP} "
+            f"{self._HTML_PAGE_MARGIN_RIGHT} "
+            f"{self._HTML_PAGE_MARGIN_BOTTOM} "
+            f"{self._HTML_PAGE_MARGIN_LEFT}"
+        )
+
+    def _playwright_pdf_margin(self, capture_profile: HTMLCaptureProfile) -> dict[str, str]:
         """Return explicit PDF margins for Playwright output."""
 
+        if capture_profile.wide_table:
+            return {
+                "top": "0",
+                "right": "0",
+                "bottom": "0",
+                "left": "0",
+            }
         return {
             "top": self._HTML_PAGE_MARGIN_TOP,
             "right": self._HTML_PAGE_MARGIN_RIGHT,
@@ -1093,8 +1257,8 @@ class PDFRenderer:
             "\\fcolorbox{CompatBorder!60}{white}{\\parbox{\\dimexpr\\linewidth-2\\fboxsep-2\\fboxrule\\relax}{\\small\\textbf{Chart note}\\\\[3pt]Compatibility mode omits pgfplots so stricter environments still compile a faithful structured preview.}}\n"
             "\\end{minipage}\n\n"
             "\\vspace{8pt}\n"
-            "\\noindent\\textbf{Traceable Preview}\\\\[3pt]\n"
-            "{\\small First rows across the leading fields. The Record anchor matches the later detail tables.}\\\\[4pt]\n"
+            "\\noindent\\textbf{Data Preview}\\\\[3pt]\n"
+            "{\\small First rows across the leading fields from the source table.}\\\\[4pt]\n"
             "\\footnotesize\n"
             f"\\begin{{tabularx}}{{\\linewidth}}{{ {preview_column_spec} }}\n"
             "\\toprule\n"
@@ -1117,8 +1281,7 @@ class PDFRenderer:
         if not document.headers:
             return [], []
 
-        data_column_limit = min(max(1, len(document.headers) - 1), 4 if len(document.headers) <= 5 else 3)
-        preview_limit = 1 + data_column_limit
+        preview_limit = min(len(document.headers), 4 if len(document.headers) <= 5 else 3)
         return (
             document.headers[:preview_limit],
             [row[:preview_limit] for row in document.rows[: min(4, len(document.rows))]],
@@ -1141,41 +1304,34 @@ class PDFRenderer:
             ]
 
         data_column_limit = self._document_detail_column_limit(document)
-        data_column_count = len(document.headers) - 1
-        if data_column_count <= data_column_limit:
-            ranges = [(1, len(document.headers))]
+        if len(document.headers) <= data_column_limit:
+            ranges = [(0, len(document.headers))]
         else:
             ranges = [
                 (start, min(len(document.headers), start + data_column_limit))
-                for start in range(1, len(document.headers), data_column_limit)
+                for start in range(0, len(document.headers), data_column_limit)
             ]
 
         sections: list[dict[str, object]] = []
         for section_index, (start, end) in enumerate(ranges, start=1):
-            headers = [document.headers[0], *document.headers[start:end]]
-            rows = [[row[0], *row[start:end]] for row in document.rows]
+            headers = document.headers[start:end]
+            rows = [row[start:end] for row in document.rows]
             if len(ranges) == 1:
                 title = "Full Index"
                 subtitle = "All columns remain together because the table still fits as one readable section."
             else:
                 title = f"Detail Section {section_index}"
-                subtitle = (
-                    f"Columns from {document.headers[start]} through {document.headers[end - 1]}. "
-                    "The Record anchor repeats in every section."
-                )
+                subtitle = f"Columns from {document.headers[start]} through {document.headers[end - 1]}."
             sections.append({"title": title, "subtitle": subtitle, "headers": headers, "rows": rows})
         return sections
 
     def _document_detail_column_limit(self, document: ParsedTableDocument) -> int:
         """Choose how many data columns belong in one readable detail section."""
 
-        if len(document.headers) <= 1:
-            return 1
-
-        data_column_count = len(document.headers) - 1
+        data_column_count = len(document.headers)
         long_text_columns = sum(
             self._infer_column_kind(document.headers, document.rows, index) == "long_text"
-            for index in range(1, len(document.headers))
+            for index in range(len(document.headers))
         )
         if data_column_count >= 10 or long_text_columns >= 3:
             return 3
@@ -2157,7 +2313,7 @@ class PDFRenderer:
                 "<b>Chart note:</b> Non-LaTeX fallback omits the chart but preserves the same summary-plus-details structure.",
                 body_text_style,
             ),
-            Paragraph("Traceable Preview", section_title_style),
+            Paragraph("Data Preview", section_title_style),
             build_table(preview_headers, preview_rows),
             PageBreak(),
             Paragraph("Detailed Tables", title_style),

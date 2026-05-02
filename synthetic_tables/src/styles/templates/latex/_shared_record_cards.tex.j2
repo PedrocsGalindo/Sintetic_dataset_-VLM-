@@ -1,10 +1,10 @@
 {% if record_cards %}
-\section*{Record Digest}
-\noindent\textit{Preview cards keep the Record anchor visible while the full index below preserves the complete tabular traceability view.}
+\section*{Data Digest}
+\noindent\textit{Preview cards summarize source-table values before the detailed tables.}
 
 {% for card in record_cards %}
 \begin{minipage}[t]{0.485\linewidth}
-\begin{recordCard}[title={ {{ card.record_label_escaped }} }]
+\begin{recordCard}[title={ {{ card.title_escaped }} }]
 \footnotesize
 \textit{ {{ card.summary_escaped }} }
 \vspace{5pt}
@@ -21,7 +21,7 @@
 \end{tabularx}
 \end{recordCard}
 \end{minipage}
-{% if loop.index is odd %}\hfill{% else %}\par\vspace{8pt}{% endif %}
+{% if loop.index is odd %}\hfill{% else %}\par\vspace{3pt}{% endif %}
 {% endfor %}
 {% if record_cards|length is odd %}\par{% endif %}
 {% endif %}

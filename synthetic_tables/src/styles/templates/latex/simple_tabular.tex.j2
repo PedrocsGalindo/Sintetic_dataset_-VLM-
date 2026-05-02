@@ -16,6 +16,8 @@
 \color{BodyText}
 \renewcommand{\arraystretch}{ {{ latex.arraystretch }} }
 \setlength{\tabcolsep}{ {{ latex.tabcolsep_pt }}pt }
+\setlength{\LTleft}{0pt}
+\setlength{\LTright}{0pt}
 \setlength{\emergencystretch}{2em}
 \begin{document}
 \pagestyle{empty}
@@ -31,13 +33,17 @@
 \textbf{Columns} & {{ table.columns }} \\
 \end{tabularx}
 
-\vspace{8pt}
+\vspace{3pt}
 
 {% for section in latex.detail_sections %}
 \noindent\textbf{ {{ section.title_escaped }} }\\[3pt]
 {\small\textit{ {{ section.subtitle_escaped }} }}\\[4pt]
 
-{{ section.font_command }}
+\noindent
+\setlength{\LTleft}{0pt}
+\setlength{\LTright}{0pt}
+\setlength{\tabcolsep}{1pt}
+{\scriptsize
 \rowcolors{2}{HeaderFill!10}{white}
 \begin{longtable}{ {{ section.column_spec }} }
 \toprule
@@ -59,12 +65,16 @@
 {% endfor %}
 \bottomrule
 \end{longtable}
-\normalsize
+}
 \vspace{6pt}
 {% endfor %}
 
 % PDF_FALLBACK_TABLE_BEGIN
-% {{ latex.full_index_font }}
+% \noindent
+% \setlength{\LTleft}{0pt}
+% \setlength{\LTright}{0pt}
+% \setlength{\tabcolsep}{1pt}
+% {\scriptsize
 % \rowcolors{2}{HeaderFill!10}{white}
 % \begin{longtable}{ {{ latex.full_index_column_spec }} }
 % \toprule
@@ -80,7 +90,7 @@
 {% endfor %}
 % \bottomrule
 % \end{longtable}
-% \normalsize
+% }
 % PDF_FALLBACK_TABLE_END
 
 \end{document}
