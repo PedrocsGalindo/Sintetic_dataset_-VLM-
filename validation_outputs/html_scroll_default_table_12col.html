@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Validation 12 Column Scroll Table - synthetic document</title>
+  <style>
+    :root {
+      --page-bg: #FFFDF8;
+      --text-color: #2D1F1A;
+      --accent-color: #9C4221;
+      --border-color: #8A6D3B;
+      --header-bg: #F5E6CC;
+      --font-family: Verdana;
+      --font-size: 10pt;
+      --line-height: 1.51;
+      --padding: 6px;
+      --sheet-width: min(1500px, 98vw);
+      --table-font-scale: 0.82;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 10px 12px;
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.88), transparent 32%),
+        linear-gradient(180deg, #eef5fb 0%, var(--page-bg) 100%);
+      color: var(--text-color);
+      font-family: var(--font-family), serif;
+      font-size: var(--font-size);
+      line-height: var(--line-height);
+    }
+
+    .table-wrap {
+      width: var(--sheet-width);
+      margin: 0;
+      padding: 12px;
+      background: #ffffff;
+      border: 1px dashed var(--border-color);
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+      max-width: 100%;
+      overflow: hidden;
+    }
+
+    .masthead {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .table-title {
+      margin: 0 0 8px 0;
+      color: var(--accent-color);
+      font-size: calc(var(--font-size) * 1.2);
+      letter-spacing: 0.03em;
+    }
+
+    .subtitle {
+      margin: 0;
+      max-width: 72ch;
+      opacity: 0.82;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(90px, 1fr));
+      gap: 8px;
+      min-width: 240px;
+    }
+
+    .stat {
+      border: 1px solid rgba(92, 107, 122, 0.26);
+      background: rgba(248, 250, 252, 0.88);
+      padding: 7px 9px;
+    }
+
+    .stat-label {
+      display: block;
+      font-size: 0.74em;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.72;
+    }
+
+    .stat-value {
+      display: block;
+      margin-top: 3px;
+      font-size: 1.1em;
+      font-weight: 700;
+    }
+
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+
+    table {
+      width: 100%;
+      min-width: 1320px;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: calc(var(--font-size) * var(--table-font-scale));
+    }
+
+    thead th {
+      background: var(--header-bg);
+      border: 1px dashed var(--border-color);
+      padding: calc(var(--padding) * 0.55) calc(var(--padding) * 0.65);
+      text-align: left;
+      vertical-align: bottom;
+      overflow-wrap: break-word;
+      word-break: normal;
+      font-style: italic; font-weight: 600;
+    }
+
+    tbody td {
+      border: 1px dashed var(--border-color);
+      padding: calc(var(--padding) * 0.55) calc(var(--padding) * 0.65);
+      vertical-align: top;
+      min-width: 0;
+      overflow-wrap: break-word;
+      word-break: normal;
+      hyphens: auto;
+    }
+
+    .kind-long_text {
+      overflow-wrap: break-word;
+    }
+
+    .kind-compact,
+    .kind-numeric {
+      overflow-wrap: break-word;
+      word-break: normal;
+      white-space: normal;
+    }
+
+
+    .col-0 {
+      text-align: center;
+      width: 7.71%;
+    }
+    .col-1 {
+      text-align: center;
+      width: 6.76%;
+    }
+    .col-2 {
+      text-align: center;
+      width: 6.76%;
+    }
+    .col-3 {
+      text-align: center;
+      width: 6.76%;
+    }
+    .col-4 {
+      text-align: center;
+      width: 7.83%;
+    }
+    .col-5 {
+      text-align: center;
+      width: 9.33%;
+    }
+    .col-6 {
+      text-align: center;
+      width: 9.38%;
+    }
+    .col-7 {
+      text-align: center;
+      width: 7.91%;
+    }
+    .col-8 {
+      text-align: center;
+      width: 6.67%;
+    }
+    .col-9 {
+      text-align: center;
+      width: 7.13%;
+    }
+    .col-10 {
+      text-align: center;
+      width: 14.46%;
+    }
+    .col-11 {
+      text-align: center;
+      width: 9.31%;
+    }
+  </style>
+</head>
+<body>
+  <section class="table-wrap">
+    <header class="masthead">
+      <div>
+        <h1 class="table-title">Validation 12 Column Scroll Table</h1>
+        <p class="subtitle">Synthetic document layouts for OCR and VLM extraction tests. The same structured content is restaged in alternate HTML compositions.</p>
+      </div>
+      <div class="stats">
+        <div class="stat">
+          <span class="stat-label">Rows</span>
+          <span class="stat-value">3</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Columns</span>
+          <span class="stat-value">12</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Long Text Fields</span>
+          <span class="stat-value">1</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Compact Fields</span>
+          <span class="stat-value">8</span>
+        </div>
+      </div>
+    </header>
+    <div class="table-scroll">
+      <table aria-label="validation_12_column_scroll_table">
+        <thead>
+          <tr>
+            <th class="col-0 kind-compact">Record Id</th>
+            <th class="col-1 kind-numeric">Quantity</th>
+            <th class="col-2 kind-numeric">Amount</th>
+            <th class="col-3 kind-numeric">Coverage</th>
+            <th class="col-4 kind-compact">Event Date</th>
+            <th class="col-5 kind-text">Status</th>
+            <th class="col-6 kind-text">Region</th>
+            <th class="col-7 kind-compact">Product Code</th>
+            <th class="col-8 kind-numeric">Split</th>
+            <th class="col-9 kind-numeric">Scientific Value</th>
+            <th class="col-10 kind-long_text">Notes</th>
+            <th class="col-11 kind-text">Category</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="col-0 kind-compact">R-001</td>
+            <td class="col-1 kind-numeric">101</td>
+            <td class="col-2 kind-numeric">1235.56</td>
+            <td class="col-3 kind-numeric">88%</td>
+            <td class="col-4 kind-compact">2026-05-01</td>
+            <td class="col-5 kind-text">Active</td>
+            <td class="col-6 kind-text">Northwest</td>
+            <td class="col-7 kind-compact">AX-1Q-VALID</td>
+            <td class="col-8 kind-numeric">1/12</td>
+            <td class="col-9 kind-numeric">4.528e+01</td>
+            <td class="col-10 kind-long_text">Readable validation note with enough text to test wrapping.</td>
+            <td class="col-11 kind-text">A</td>
+          </tr>
+          <tr>
+            <td class="col-0 kind-compact">R-002</td>
+            <td class="col-1 kind-numeric">102</td>
+            <td class="col-2 kind-numeric">1236.56</td>
+            <td class="col-3 kind-numeric">89%</td>
+            <td class="col-4 kind-compact">2026-05-02</td>
+            <td class="col-5 kind-text">Active</td>
+            <td class="col-6 kind-text">Northwest</td>
+            <td class="col-7 kind-compact">AX-2Q-VALID</td>
+            <td class="col-8 kind-numeric">2/12</td>
+            <td class="col-9 kind-numeric">8.390e-05</td>
+            <td class="col-10 kind-long_text">Readable validation note with enough text to test wrapping.</td>
+            <td class="col-11 kind-text">A</td>
+          </tr>
+          <tr>
+            <td class="col-0 kind-compact">R-003</td>
+            <td class="col-1 kind-numeric">103</td>
+            <td class="col-2 kind-numeric">1237.56</td>
+            <td class="col-3 kind-numeric">90%</td>
+            <td class="col-4 kind-compact">2026-05-03</td>
+            <td class="col-5 kind-text">Active</td>
+            <td class="col-6 kind-text">Northwest</td>
+            <td class="col-7 kind-compact">AX-3Q-VALID</td>
+            <td class="col-8 kind-numeric">3/12</td>
+            <td class="col-9 kind-numeric">1.204e+08</td>
+            <td class="col-10 kind-long_text">Readable validation note with enough text to test wrapping.</td>
+            <td class="col-11 kind-text">A</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</body>
+</html>

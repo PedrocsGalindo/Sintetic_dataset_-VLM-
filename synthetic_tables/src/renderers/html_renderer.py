@@ -36,7 +36,7 @@ class HTMLFieldView:
 class HTMLRecordView:
     """Represent one row repackaged for alternate HTML layouts."""
 
-    record_label: str
+    title: str
     headline: str
     fields: list[HTMLFieldView]
     line_fields: list[HTMLFieldView]
@@ -50,9 +50,8 @@ class HTMLRecordView:
 class HTMLRenderer:
     """Render a generated table to HTML using templates and CSS."""
 
-    _RECORD_HEADER = "Record"
     _FIRST_TEMPLATE_NAME = "simple_tabular.html.j2"
-    _FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS = 5
+    _FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS = 12
 
     def __init__(self, template_dir: Path | None = None) -> None:
         resolved_template_dir = template_dir or Path(__file__).resolve().parents[1] / "styles" / "templates" / "html"
@@ -73,7 +72,8 @@ class HTMLRenderer:
             ["" if row[column_name] is None else str(row[column_name]) for column_name in table.columns]
             for row in table.rows
         ]
-        columns, rows = self._with_record_column(data_columns, data_rows)
+        columns = data_columns
+        rows = data_rows
         table_sections = self._table_sections_for_template(style.template_name, columns, rows)
         css = {
             "border_style": self._map_border_style(style.border_style),
@@ -81,6 +81,7 @@ class HTMLRenderer:
             "header_emphasis_css": self._header_emphasis_css(style.header_emphasis),
             "sheet_width": self._sheet_width(style.template_name, len(table.columns)),
             "table_font_scale": self._table_font_scale(len(table.columns)),
+            "table_min_width": self._table_min_width(len(table.columns)),
             "record_columns": self._record_column_count(table),
             "dense_grid_columns": self._dense_grid_columns(table),
         }
@@ -137,7 +138,7 @@ class HTMLRenderer:
         compact_column_count = sum(column.kind in {"compact", "numeric"} for column in columns)
         long_text_column_count = sum(column.kind == "long_text" for column in columns)
 
-        for row_index, row in enumerate(rows, start=1):
+        for row in rows:
             fields: list[HTMLFieldView] = []
             line_fields: list[HTMLFieldView] = []
             column_fields: list[HTMLFieldView] = []
@@ -172,14 +173,15 @@ class HTMLRenderer:
             elif compact_fields:
                 headline = " | ".join(f"{field.label}: {field.value}" for field in compact_fields[:2])
             else:
-                headline = self._row_label(row_index)
+                headline = "Entry"
 
             narrative_fields = fields[: min(len(fields), 6)]
             narrative = " | ".join(f"{field.label}: {field.value}" for field in narrative_fields)
             note = " ".join(field.value for field in text_fields[:2]).strip()
+            title = self._record_title(headline, compact_fields, fields)
             records.append(
                 HTMLRecordView(
-                    record_label=self._row_label(row_index),
+                    title=title,
                     headline=headline,
                     fields=fields,
                     line_fields=line_fields,
@@ -200,7 +202,7 @@ class HTMLRenderer:
 
         metric_groups = [
             {
-                "title": record.record_label,
+                "title": record.title,
                 "entries": record.compact_fields[:6] or record.fields[:4],
                 "summary": record.note or record.narrative,
             }
@@ -209,7 +211,7 @@ class HTMLRenderer:
 
         stream_rows = [
             {
-                "label": record.record_label,
+                "label": record.title,
                 "segments": record.fields[:7],
             }
             for record in records
@@ -217,7 +219,7 @@ class HTMLRenderer:
 
         article_sections = [
             {
-                "label": record.record_label,
+                "label": record.title,
                 "title": record.headline,
                 "paragraph": self._paragraph_for_record(record),
                 "meta_line": self._meta_line_for_record(record),
@@ -271,66 +273,6 @@ class HTMLRenderer:
         return value.replace("_", " ").title()
 
     @staticmethod
-    def _row_label(row_index: int) -> str:
-        """Return the renderer-owned Record value for one table row."""
-
-        return f"Record {row_index:03d}"
-
-    def _with_record_column(
-        self,
-        data_columns: list[HTMLColumnView],
-        data_rows: list[list[str]],
-    ) -> tuple[list[HTMLColumnView], list[list[str]]]:
-        """Add the synthetic Record column as a regular visible HTML column."""
-
-        columns = [
-            HTMLColumnView(
-                display_name=self._RECORD_HEADER,
-                alignment="left",
-                width="auto",
-                kind="compact",
-            ),
-            *data_columns,
-        ]
-        rows = [
-            [self._row_label(row_index), *row]
-            for row_index, row in enumerate(data_rows, start=1)
-        ]
-        return self._with_record_width(columns), rows
-
-    def _with_record_width(self, columns: list[HTMLColumnView]) -> list[HTMLColumnView]:
-        """Add Record width while preserving existing data-column proportions when available."""
-
-        if not columns:
-            return []
-        data_widths = [self._percent_value(column.width) for column in columns[1:]]
-        if not data_widths or any(width is None for width in data_widths):
-            return self._with_table_widths(columns)
-
-        record_width = 8.5 if len(columns) >= 8 else 11.0
-        data_total = sum(width for width in data_widths if width is not None) or 1.0
-        data_target = 100.0 - record_width
-        resolved_columns = [
-            HTMLColumnView(
-                display_name=columns[0].display_name,
-                alignment=columns[0].alignment,
-                width=f"{record_width:.2f}%",
-                kind=columns[0].kind,
-            )
-        ]
-        for column, width in zip(columns[1:], data_widths):
-            assert width is not None
-            resolved_columns.append(
-                HTMLColumnView(
-                    display_name=column.display_name,
-                    alignment=column.alignment,
-                    width=f"{(width / data_total) * data_target:.2f}%",
-                    kind=column.kind,
-                )
-            )
-        return resolved_columns
-
-    @staticmethod
     def _percent_value(width: str) -> float | None:
         """Parse a percentage width string produced by the HTML planner."""
 
@@ -348,21 +290,19 @@ class HTMLRenderer:
         columns: list[HTMLColumnView],
         rows: list[list[str]],
     ) -> list[dict[str, object]]:
-        """Split the first dense template into Record-anchored horizontal blocks."""
+        """Split the first dense template into horizontal blocks."""
 
         if not columns:
             return []
         if template_name != self._FIRST_TEMPLATE_NAME or len(columns) <= self._FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS:
             return [{"title": "Full Index", "columns": columns, "rows": rows}]
 
-        record_column = columns[0]
-        data_columns = columns[1:]
-        data_columns_per_block = max(1, self._FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS - 1)
+        data_columns_per_block = self._FIRST_TEMPLATE_MAX_VISIBLE_COLUMNS
         sections: list[dict[str, object]] = []
-        for section_index, start in enumerate(range(0, len(data_columns), data_columns_per_block), start=1):
+        for section_index, start in enumerate(range(0, len(columns), data_columns_per_block), start=1):
             end = start + data_columns_per_block
-            section_columns = self._with_table_widths([record_column, *data_columns[start:end]])
-            section_rows = [[row[0], *row[1 + start : 1 + end]] for row in rows]
+            section_columns = self._with_table_widths(columns[start:end])
+            section_rows = [row[start:end] for row in rows]
             sections.append(
                 {
                     "title": f"Block {section_index}",
@@ -438,10 +378,10 @@ class HTMLRenderer:
 
         kind = self._kind_for_dtype(column_schema.dtype)
         base = {
-            "long_text": 2.45,
-            "text": 1.30,
-            "compact": 0.82,
-            "numeric": 0.70,
+            "long_text": 2.10,
+            "text": 1.20,
+            "compact": 0.90,
+            "numeric": 0.85,
         }.get(kind, 1.0)
         header = self._display_name(column_schema.name)
         values = [
@@ -454,7 +394,7 @@ class HTMLRenderer:
             if non_empty
             else len(header)
         )
-        return base + min(len(header), 24) * 0.025 + min(average_length, 44) * 0.012
+        return base + min(len(header), 24) * 0.020 + min(average_length, 44) * 0.010
 
     def _html_column_minimum_percent(self, dtype: str, column_count: int) -> float:
         """Keep compact columns narrow while preserving a floor for readable text."""
@@ -463,21 +403,21 @@ class HTMLRenderer:
 
     @staticmethod
     def _html_kind_minimum_percent(kind: str, column_count: int) -> float:
-        """Keep compact columns narrow while preserving a floor for readable text."""
+        """Keep HTML columns readable without over-compressing wide tables."""
 
         if column_count >= 10:
             floors = {
-                "numeric": 4.6,
-                "compact": 5.2,
-                "text": 6.4,
-                "long_text": 9.0,
+                "numeric": 5.0,
+                "compact": 5.8,
+                "text": 7.0,
+                "long_text": 10.0,
             }
         elif column_count >= 7:
             floors = {
-                "numeric": 5.4,
-                "compact": 6.0,
-                "text": 7.4,
-                "long_text": 10.5,
+                "numeric": 5.8,
+                "compact": 6.6,
+                "text": 8.0,
+                "long_text": 11.5,
             }
         else:
             floors = {
@@ -519,19 +459,37 @@ class HTMLRenderer:
     @staticmethod
     def _table_font_scale(column_count: int) -> str:
         if column_count >= 12:
-            return "0.78"
+            return "0.82"
         if column_count >= 10:
-            return "0.84"
+            return "0.86"
         if column_count >= 8:
-            return "0.90"
+            return "0.92"
         return "1"
+
+    @staticmethod
+    def _table_min_width(column_count: int) -> str:
+        if column_count >= 12:
+            return "1680px"
+        if column_count >= 10:
+            return "1500px"
+        if column_count >= 8:
+            return "1200px"
+        return "100%"
 
     @staticmethod
     def _sheet_width(template_name: str, column_count: int) -> str:
         if template_name == "simple_tabular.html.j2":
-            return "min(1500px, 98vw)" if column_count >= 10 else "min(1320px, 96vw)"
+            if column_count >= 12:
+                return "1800px"
+            if column_count >= 10:
+                return "1500px"
+            return "min(1320px, 96vw)"
         if template_name == "default_table.html.j2":
-            return "min(1500px, 98vw)" if column_count >= 10 else "min(1320px, 96vw)"
+            if column_count >= 12:
+                return "1800px"
+            if column_count >= 10:
+                return "1500px"
+            return "min(1320px, 96vw)"
         if template_name == "document_columns.html.j2":
             return "min(1180px, 92vw)"
         if template_name == "document_stream.html.j2":
@@ -562,17 +520,7 @@ class HTMLRenderer:
 
     @staticmethod
     def _alignment_for(dtype: str, alignment_profile: str) -> str:
-        if alignment_profile == "left":
-            return "left"
-        if alignment_profile == "center":
-            return "center"
-        if alignment_profile == "numeric_right":
-            return "right" if dtype in {"integer", "decimal", "percentage", "fraction"} else "left"
-        if dtype in {"integer", "decimal", "percentage", "fraction"}:
-            return "right"
-        if dtype in {"date", "identifier", "alphanumeric_code", "symbolic_mixed"}:
-            return "center"
-        return "left"
+        return "center"
 
     @staticmethod
     def _map_border_style(border_style: str) -> str:
@@ -615,6 +563,19 @@ class HTMLRenderer:
 
         metadata = [f"{field.label}: {field.value}" for field in record.compact_fields[:4]]
         return " | ".join(metadata)
+
+    @staticmethod
+    def _record_title(
+        headline: str,
+        compact_fields: list[HTMLFieldView],
+        fields: list[HTMLFieldView],
+    ) -> str:
+        """Choose a visible row title from source-table values only."""
+
+        for field in [*compact_fields, *fields]:
+            if field.value and field.value != "-":
+                return f"{field.label}: {field.value}"
+        return headline if headline and headline != "-" else "Entry"
 
     @staticmethod
     def _chunk_items(items: list[dict[str, object]], chunk_count: int) -> list[list[dict[str, object]]]:

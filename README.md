@@ -140,8 +140,8 @@ Mudancas de layout/rendering:
   - `simple_tabular.tex.j2` para LaTeX;
   - `simple_tabular` para Markdown.
 - Os templates alternativos continuam declarados em `TEMPLATE_NAMES_BY_FORMAT`, mas nao sao escolhidos aleatoriamente pelo `main.py` atual.
-- HTML, Markdown e LaTeX agora adicionam uma coluna sintetica `Record` com valores `Record NNN` para preservar rastreabilidade das linhas.
-- Tabelas largas passaram a ser divididas em blocos/matrizes com o mesmo `Record` repetido, em vez de tentar comprimir tudo em uma unica largura.
+- HTML, Markdown e LaTeX renderizam apenas as colunas reais da tabela base, sem coluna sintetica `Record`.
+- Tabelas largas sao divididas em blocos/matrizes usando somente as colunas originais, em vez de tentar comprimir tudo em uma unica largura.
 - O rendering LaTeX normal ficou estrito: ele exige um motor TeX real e nao troca automaticamente para ReportLab/xhtml2pdf no pipeline principal.
 
 ## Compatibilidade E Legado
@@ -179,8 +179,8 @@ Regras principais em `synthetic_tables/src/renderers/html_renderer.py`:
 
 - Usa templates Jinja em `synthetic_tables/src/styles/templates/html/`.
 - O default do pipeline atual e `simple_tabular.html.j2`.
-- Adiciona uma coluna visivel `Record`.
-- Para o template simples, se houver mais de 5 colunas visiveis, divide a tabela em blocos `Block N`, mantendo `Record` em todos os blocos.
+- Renderiza somente as colunas reais da tabela base.
+- Para o template simples, se houver mais de 5 colunas visiveis, divide a tabela em blocos `Block N`.
 - Para tabelas com 6 ou mais colunas reais, ignora o modo de largura simples e calcula larguras semanticas por tipo de conteudo.
 - Reduz escala de fonte em tabelas mais largas.
 - Ajusta largura da folha conforme o template e a quantidade de colunas.
@@ -198,9 +198,9 @@ Regras principais em `synthetic_tables/src/renderers/markdown_renderer.py`:
 - Markdown e montado programaticamente, sem templates Jinja.
 - O default do pipeline atual e `simple_tabular`.
 - O arquivo `.md` inclui no topo um comentario `markdown-style` em JSON com estilo e template.
-- A tabela simples adiciona `Record` e divide tabelas largas em blocos de ate 5 colunas visiveis.
+- A tabela simples usa apenas colunas reais e divide tabelas largas em blocos de ate 5 colunas visiveis.
 - Layouts alternativos suportados no codigo: `default_markdown`, `markdown_records`, `markdown_mixed` e `markdown_briefing`.
-- Para layouts alternativos, datasets largos e ricos em strings podem virar `Matrix A`/`Matrix B`, sempre com ancoragem por `Record`.
+- Para layouts alternativos, datasets largos e ricos em strings podem virar `Matrix A`/`Matrix B`, mantendo a ordem original das linhas.
 
 Conversao Markdown -> PDF em `synthetic_tables/src/renderers/pdf_renderer.py`:
 
@@ -215,11 +215,11 @@ Regras principais em `synthetic_tables/src/renderers/latex_renderer.py`:
 
 - Usa templates Jinja em `synthetic_tables/src/styles/templates/latex/`.
 - O default do pipeline atual e `simple_tabular.tex.j2`.
-- Adiciona `Record` como coluna de rastreabilidade.
+- Renderiza somente as colunas reais da tabela base.
 - Templates simples e safe-preview sao respeitados diretamente.
 - Templates criativos podem ser redirecionados para `split_matrix.tex.j2` quando a tabela e larga ou muito categorica.
 - O planner tenta layouts em ordem: `portrait`, `landscape`, `landscape-compact` e, se necessario, `split`.
-- Cada detalhe dividido repete a coluna `Record`.
+- Cada detalhe dividido preserva a ordem original das linhas sem repetir coluna sintetica.
 - Charts LaTeX aparecem nos templates criativos quando ha coluna numerica estavel e ate 75 linhas; os pontos sao divididos em paineis de ate 25 linhas.
 
 Conversao LaTeX -> PDF em `synthetic_tables/src/renderers/pdf_renderer.py`:

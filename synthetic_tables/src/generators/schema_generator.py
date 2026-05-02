@@ -18,6 +18,7 @@ SUPPORTED_COLUMN_TYPES: tuple[str, ...] = (
     "decimal",
     "percentage",
     "fraction",
+    "exponential",
     "date",
     "identifier",
     "alphanumeric_code",
@@ -36,6 +37,7 @@ COLUMN_NAME_CANDIDATES: dict[str, tuple[str, ...]] = {
     "decimal": ("amount", "value", "balance", "metric", "price", "ratio"),
     "percentage": ("coverage", "success_rate", "completion", "utilization", "share", "ratio_pct"),
     "fraction": ("mix", "split", "allocation", "composition", "part_ratio", "portion"),
+    "exponential": ("growth_factor", "scale_value", "scientific_value", "magnitude", "exp_metric"),
     "date": ("event_date", "issue_date", "recorded_on", "created_at", "updated_at", "due_date"),
     "identifier": ("record_id", "invoice_id", "batch_id", "entry_id", "ticket_id", "entity_id"),
     "alphanumeric_code": ("product_code", "serial_code", "tag_code", "asset_code", "unit_code", "ref_code"),
@@ -161,8 +163,24 @@ class SchemaGenerator:
         for table_index in range(table_count):
             row_count = rng.randint(self.min_rows, self.max_rows)
             column_count = rng.randint(self.min_columns, self.max_columns)
+
+            # Hard code -> numero fixo de colunas para base_table 1 e 2
+            if table_index == 0:
+                column_count = 11
+            if table_index == 1:
+                column_count = 12
+                
             table_seed = rng.randint(0, 10**9)
             forced_dtypes: list[str] = []
+
+            if table_index == 0:
+                for dtype in ("fraction", "percentage", "exponential"):
+                    if len(forced_dtypes) >= column_count:
+                        break
+                    if dtype not in forced_dtypes:
+                        forced_dtypes.append(dtype)
+                    if dtype in coverage_pool:
+                        coverage_pool.remove(dtype)
 
             while coverage_pool and len(forced_dtypes) < min(2, column_count):
                 forced_dtypes.append(coverage_pool.pop())
@@ -177,7 +195,7 @@ class SchemaGenerator:
             if table_index == 0:
                 for column in schema.columns:
                     if column.dtype in {"text_short", "text_long"}:
-                        column.metadata["max_length"] = 40
+                        column.metadata["max_length"] = 50
             schemas.append(schema)
 
         return schemas
@@ -245,6 +263,16 @@ class SchemaGenerator:
                 {
                     "max_numerator": rng.randint(3, max_denominator - 1),
                     "max_denominator": max_denominator,
+                }
+            )
+        elif dtype == "exponential":
+            metadata.update(
+                {
+                    "min_exponent": rng.choice((-6, -4, -3)),
+                    "max_exponent": rng.choice((3, 4, 6)),
+                    "precision": rng.choice((1, 2, 3)),
+                    "min_coefficient": 1.0,
+                    "max_coefficient": 9.9,
                 }
             )
         elif dtype == "date":

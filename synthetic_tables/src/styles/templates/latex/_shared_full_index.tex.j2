@@ -1,12 +1,16 @@
 \clearpage
 \section*{Detailed Tables}
-\noindent\textit{Detailed row content starts after the overview page. Every section repeats the Record anchor so the PDF remains traceable back to the generated source rows.}
+\noindent\textit{Detailed row content starts after the overview page, using only the generated source-table columns.}
 
 {% for section in latex.detail_sections %}
 \subsection*{ {{ section.title_escaped }} }
 \noindent\textit{ {{ section.subtitle_escaped }} }
 
-{{ section.font_command }}
+\noindent
+\setlength{\LTleft}{0pt}
+\setlength{\LTright}{0pt}
+\setlength{\tabcolsep}{1pt}
+{\scriptsize
 \rowcolors{2}{HeaderFill!10}{white}
 \begin{longtable}{ {{ section.column_spec }} }
 \toprule
@@ -28,11 +32,15 @@
 {% endfor %}
 \bottomrule
 \end{longtable}
-\normalsize
+}
 {% endfor %}
 
 % PDF_FALLBACK_TABLE_BEGIN
-% {{ latex.full_index_font }}
+% \noindent
+% \setlength{\LTleft}{0pt}
+% \setlength{\LTright}{0pt}
+% \setlength{\tabcolsep}{1pt}
+% {\scriptsize
 % \rowcolors{2}{HeaderFill!10}{white}
 % \begin{longtable}{ {{ latex.full_index_column_spec }} }
 % \toprule
@@ -48,5 +56,5 @@
 {% endfor %}
 % \bottomrule
 % \end{longtable}
-% \normalsize
+% }
 % PDF_FALLBACK_TABLE_END

@@ -15,6 +15,8 @@
 \color{CompatBody}
 \renewcommand{\arraystretch}{ {{ latex.arraystretch }} }
 \setlength{\tabcolsep}{ {{ latex.tabcolsep_pt }}pt }
+\setlength{\LTleft}{0pt}
+\setlength{\LTright}{0pt}
 \setlength{\emergencystretch}{2em}
 \begin{document}
 \pagestyle{empty}
@@ -44,7 +46,7 @@ Compatibility mode omits `pgfplots` and other higher-risk packages so stricter L
 }
 \end{minipage}
 
-\vspace{8pt}
+\vspace{3pt}
 {% if preview_table %}
 \noindent\textbf{ {{ preview_table.title_escaped }} }\\[3pt]
 {\small {{ preview_table.subtitle_escaped }}}\\[4pt]
@@ -74,7 +76,11 @@ Compatibility mode omits `pgfplots` and other higher-risk packages so stricter L
 \subsection*{ {{ section.title_escaped }} }
 \noindent\textit{ {{ section.subtitle_escaped }} }
 
-{{ section.font_command }}
+\noindent
+\setlength{\LTleft}{0pt}
+\setlength{\LTright}{0pt}
+\setlength{\tabcolsep}{1pt}
+{\scriptsize
 \rowcolors{2}{CompatHeader!10}{white}
 \begin{longtable}{ {{ section.column_spec }} }
 \toprule
@@ -96,11 +102,15 @@ Compatibility mode omits `pgfplots` and other higher-risk packages so stricter L
 {% endfor %}
 \bottomrule
 \end{longtable}
-\normalsize
+}
 {% endfor %}
 
 % PDF_FALLBACK_TABLE_BEGIN
-% {{ latex.full_index_font }}
+% \noindent
+% \setlength{\LTleft}{0pt}
+% \setlength{\LTright}{0pt}
+% \setlength{\tabcolsep}{1pt}
+% {\scriptsize
 % \rowcolors{2}{CompatHeader!10}{white}
 % \begin{longtable}{ {{ latex.full_index_column_spec }} }
 % \toprule
@@ -116,7 +126,7 @@ Compatibility mode omits `pgfplots` and other higher-risk packages so stricter L
 {% endfor %}
 % \bottomrule
 % \end{longtable}
-% \normalsize
+% }
 % PDF_FALLBACK_TABLE_END
 
 \end{document}
