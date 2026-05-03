@@ -9,6 +9,10 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+FILTER_SOURCE_FORMAT = [
+    "markdown",
+]
+
 REQUIRED_METADATA_COLUMNS = [
 #    "sample_id",
     "base_table_id",
@@ -143,6 +147,8 @@ def copy_images_and_build_metadata(
 
         table_id = str(sample.get("table_id") or "").strip()
         source_format = str(sample.get("source_format") or "").strip()
+        if source_format.lower() in FILTER_SOURCE_FORMAT:
+            continue
         visual_version = str(sample.get("visual_version") or "").strip()
         dpi = sample.get("dpi")
         sample_id = str(sample.get("sample_id") or "").strip()
